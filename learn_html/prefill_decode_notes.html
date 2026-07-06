@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prefill / Decode 性能拆解实验笔记</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #607086;
+      --line: #dbe3ef;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+      --ok: #047857;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+
+    header {
+      color: #fff;
+      background: linear-gradient(135deg, #173b70 0%, #2563eb 100%);
+      padding: 44px 24px;
+    }
+
+    header .wrap,
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 880px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 24px 56px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f7;
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0;
+      padding: 16px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      margin: 14px 0;
+      border-collapse: collapse;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5fb;
+      font-weight: 700;
+    }
+
+    .lead {
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 16px 0 4px;
+    }
+
+    .metric {
+      padding: 16px;
+      background: var(--accent-soft);
+      border: 1px solid #c7d7fe;
+      border-radius: 8px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      color: var(--accent);
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .step {
+      min-height: 116px;
+      padding: 16px;
+      background: #f8fbff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
+    .note {
+      margin: 12px 0;
+      padding: 12px 14px;
+      background: #f8fbff;
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+    }
+
+    .warn-note {
+      border-left-color: var(--warn);
+      background: #fffaf0;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .bad {
+      color: var(--bad);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    @media (max-width: 860px) {
+      header {
+        padding: 34px 18px;
+      }
+
+      main {
+        padding: 20px 16px 44px;
+      }
+
+      section {
+        padding: 18px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .metric-grid,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Prefill / Decode 性能拆解实验笔记</h1>
+      <p>
+        把一次黑盒 model.generate() 拆成可观测的 prefill 和 decode 两个阶段，分别记录 TTFT、单 token 延迟、吞吐和显存，理解长上下文推理为什么首 token 变慢，以及 KV Cache 为什么能支撑稳定 decode。
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 一句话结论</h2>
+      <p class="lead">
+        LLM 推理可以拆成两个阶段：<strong>prefill 一次性处理完整 prompt，决定首 token 延迟和 KV Cache 大小</strong>；<strong>decode 逐 token 生成，主要看每 token 延迟和 tokens/s</strong>。
+      </p>
+      <div class="metric-grid">
+        <div class="metric">
+          <span>长 prompt 实测 TTFT</span>
+          <strong>1.4493s</strong>
+        </div>
+        <div class="metric">
+          <span>长 prompt 输入长度</span>
+          <strong>4148 tokens</strong>
+        </div>
+        <div class="metric">
+          <span>decode 延迟区间</span>
+          <strong>18-20 ms/token</strong>
+        </div>
+        <div class="metric">
+          <span>长 prompt 峰值显存</span>
+          <strong>3.15 GB</strong>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 核心概念</h2>
+      <div class="flow">
+        <div class="step">
+          <b>Prompt 输入</b>
+          用户输入会先被 tokenizer 转成 token ids。输入越长，后续 prefill 要处理的序列越长。
+        </div>
+        <div class="step">
+          <b>Prefill</b>
+          模型一次 forward 完整 prompt，计算每层 attention 的 Key/Value，并得到第一个 next token。
+        </div>
+        <div class="step">
+          <b>Decode</b>
+          后续每一步只输入上一个 token，同时复用 prefill 和历史 decode 产生的 KV Cache。
+        </div>
+        <div class="step">
+          <b>输出文本</b>
+          重复 decode，直到达到 <code>max_new_tokens</code> 或遇到 EOS 结束符。
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>做什么</th>
+            <th>主要指标</th>
+            <th>瓶颈倾向</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Prefill</td>
+            <td>完整 prompt 一次 forward，建立 KV Cache</td>
+            <td><code>TTFT</code>、<code>prefill_seconds</code>、输入 tokens、峰值显存</td>
+            <td>计算密集，对 prompt 长度非常敏感</td>
+          </tr>
+          <tr>
+            <td>Decode</td>
+            <td>一次生成一个新 token，并更新 KV Cache</td>
+            <td><code>avg_decode_latency_ms</code>、<code>decode_tokens_per_second</code></td>
+            <td>访存密集，受 KV Cache 读写和 batch 调度影响</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <strong>为什么 generated_tokens=128 但 decode_tokens=127？</strong>
+        第一个新 token 是 prefill 后直接从最后一个位置的 logits 里选出来的；后面 127 个 token 才进入逐 token decode 循环，所以这是正常计数。
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 实践代码</h2>
+      <p>本次新增了两个脚本：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>脚本</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>prefill_decode/prefill_decode_demo.py</code></td>
+            <td>单次运行，把推理显式拆成 prefill 和 decode，并打印详细指标。</td>
+          </tr>
+          <tr>
+            <td><code>prefill_decode/compare_prompt_lengths.py</code></td>
+            <td>同一个模型只加载一次，自动跑 short / medium / long 三组 prompt，对比输入长度带来的影响。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>单次拆解命令</h3>
+      <pre><code>python.exe prefill_decode\prefill_decode_demo.py `
+  --model Qwen/Qwen2.5-0.5B-Instruct `
+  --prompt "Explain KV Cache, prefill, and decode in simple terms." `
+  --max-new-tokens 128</code></pre>
+
+      <h3>长短 prompt 对比命令</h3>
+      <pre><code>python.exe prefill_decode\compare_prompt_lengths.py `
+  --short-repeat 1 `
+  --medium-repeat 16 `
+  --long-repeat 64 `
+  --max-new-tokens 128 `
+  --json-out outputs\prefill_decode_compare_large.json</code></pre>
+
+      <h3>核心代码思路</h3>
+      <pre><code># 1. Prefill: prompt 一次完整 forward，拿到 past_key_values
+outputs = model(
+    **inputs,
+    use_cache=True,
+    return_dict=True,
+)
+past_key_values = outputs.past_key_values
+next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1, keepdim=True)
+
+# 2. Decode: 每次只喂一个 token，复用 KV Cache
+outputs = model(
+    input_ids=next_token,
+    past_key_values=past_key_values,
+    use_cache=True,
+    return_dict=True,
+)</code></pre>
+    </section>
+
+    <section>
+      <h2>4. 单次实验结果</h2>
+      <p>模型：<code>Qwen/Qwen2.5-0.5B-Instruct</code>，输入 43 tokens，设置 <code>max_new_tokens=128</code>。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>数值</th>
+            <th>解释</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>input_tokens</code></td>
+            <td>43</td>
+            <td>prompt 很短，所以 prefill 压力不大。</td>
+          </tr>
+          <tr>
+            <td><code>generated_tokens</code></td>
+            <td>128</td>
+            <td>总共生成 128 个新 token。</td>
+          </tr>
+          <tr>
+            <td><code>prefill_seconds / ttft_seconds</code></td>
+            <td>0.2750s</td>
+            <td>从请求开始到首 token 的时间约 275ms。</td>
+          </tr>
+          <tr>
+            <td><code>decode_tokens</code></td>
+            <td>127</td>
+            <td>第一个 token 来自 prefill，剩余 token 来自 decode 循环。</td>
+          </tr>
+          <tr>
+            <td><code>avg_decode_latency_ms</code></td>
+            <td>18.31 ms/token</td>
+            <td>逐 token 生成时，每个 token 平均约 18ms。</td>
+          </tr>
+          <tr>
+            <td><code>decode_tokens_per_second</code></td>
+            <td>54.61 tokens/s</td>
+            <td>纯 decode 阶段吞吐。</td>
+          </tr>
+          <tr>
+            <td><code>peak_cuda_memory_gb</code></td>
+            <td>0.94 GB</td>
+            <td>0.5B 模型和短上下文下显存压力较小。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. 长短 Prompt 对比</h2>
+      <h3>第一次对比：repeat=1 / 8 / 32</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>case</th>
+            <th>input_tokens</th>
+            <th>prefill_s</th>
+            <th>decode_ms/token</th>
+            <th>decode_tok/s</th>
+            <th>total_s</th>
+            <th>peak_mem_gb</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>short</td>
+            <td>116</td>
+            <td>0.2458</td>
+            <td>18.84</td>
+            <td>53.09</td>
+            <td>1.2441</td>
+            <td>0.96</td>
+          </tr>
+          <tr>
+            <td>medium</td>
+            <td>564</td>
+            <td>0.0593</td>
+            <td>17.89</td>
+            <td>55.89</td>
+            <td>1.2582</td>
+            <td>1.10</td>
+          </tr>
+          <tr>
+            <td>long</td>
+            <td>2100</td>
+            <td>0.4215</td>
+            <td>18.53</td>
+            <td>53.95</td>
+            <td>1.3297</td>
+            <td>1.57</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>第二次对比：repeat=1 / 16 / 64</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>case</th>
+            <th>input_tokens</th>
+            <th>prefill_s</th>
+            <th>decode_ms/token</th>
+            <th>decode_tok/s</th>
+            <th>total_s</th>
+            <th>peak_mem_gb</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>short</td>
+            <td>116</td>
+            <td>0.2394</td>
+            <td>18.69</td>
+            <td>53.50</td>
+            <td>1.2301</td>
+            <td>0.96</td>
+          </tr>
+          <tr>
+            <td>medium</td>
+            <td>1076</td>
+            <td>0.1344</td>
+            <td>18.04</td>
+            <td>55.43</td>
+            <td>1.0185</td>
+            <td>1.26</td>
+          </tr>
+          <tr>
+            <td>long</td>
+            <td>4148</td>
+            <td>1.4493</td>
+            <td>19.95</td>
+            <td>50.13</td>
+            <td>2.4268</td>
+            <td>3.15</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <strong>关键观察：</strong>
+        当输入从 116 tokens 增长到 4148 tokens 时，TTFT 从约 0.24s 增加到约 1.45s，峰值显存从 0.96GB 增加到 3.15GB；decode 单 token 延迟基本保持在 18-20ms，说明长 prompt 的主要成本集中在 prefill 阶段。
+      </div>
+    </section>
+
+    <section>
+      <h2>6. 结果怎么解释</h2>
+      <h3>为什么长 prompt 的 prefill 明显变慢？</h3>
+      <p>
+        Prefill 要对完整 prompt 做一次前向计算，输入 token 越多，attention 要处理的序列越长，每层都要为这些 token 计算 Key 和 Value。长上下文会让首 token 时间明显变大，这就是线上服务常说的 TTFT 变差。
+      </p>
+
+      <h3>为什么 decode 延迟没有随 prompt 长度暴涨？</h3>
+      <p>
+        因为 KV Cache 已经保存了历史 token 的 Key/Value。decode 时模型每步只处理最新 token，然后和缓存里的历史 K/V 做 attention。上下文变长后，decode 会有更多缓存读写，长 prompt 下从 18ms/token 涨到接近 20ms/token，但没有像 prefill 那样大幅增加。
+      </p>
+
+      <h3>为什么 medium 有时比 short 快？</h3>
+      <p>
+        这是实验噪声，不是理论趋势。short 是第一组真实推理，可能吃到了 CUDA kernel 初始化、GPU 升频、显存缓存预热等开销。更严谨的做法是加 warmup，并对每组多跑几次取平均。
+      </p>
+
+      <div class="note warn-note">
+        <strong>实践注意：</strong>
+        如果要写进正式实验报告，建议让脚本支持 <code>--warmup</code> 和 <code>--runs</code>，然后报告平均值和标准差。单次结果适合学习观察，不适合做严格性能结论。
+      </div>
+    </section>
+
+    <section>
+      <h2>7. 指标口径</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>含义</th>
+            <th>怎么看</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>TTFT</code></td>
+            <td>Time To First Token，本实验里近似等于 prefill 时间。</td>
+            <td>用户体感的首字响应速度，长 prompt 会明显拉高。</td>
+          </tr>
+          <tr>
+            <td><code>avg_decode_latency_ms</code></td>
+            <td>decode 阶段每个 token 的平均生成延迟。</td>
+            <td>越低说明逐 token 生成越快。</td>
+          </tr>
+          <tr>
+            <td><code>decode_tokens_per_second</code></td>
+            <td>decode 阶段吞吐，不包含 prefill。</td>
+            <td>更适合观察 KV Cache 下的持续生成速度。</td>
+          </tr>
+          <tr>
+            <td><code>end_to_end_tokens_per_second</code></td>
+            <td>把 prefill 和 decode 都算进来的整体吞吐。</td>
+            <td>短输出或长输入场景下，会被 TTFT 明显影响。</td>
+          </tr>
+          <tr>
+            <td><code>peak_cuda_memory_gb</code></td>
+            <td>运行过程中的 CUDA 峰值显存。</td>
+            <td>prompt 越长，KV Cache 越大，显存越高。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>8. 面试表达</h2>
+      <div class="note">
+        我把一次 LLM 推理拆成了 prefill 和 decode 两个阶段来测。Prefill 阶段对完整 prompt 做一次 forward，并建立每层 attention 的 KV Cache，所以它主要影响 TTFT，输入越长越慢；decode 阶段每次只输入一个新 token，并复用历史 KV Cache，所以每 token 延迟相对稳定。在我的实验里，输入从 116 tokens 增加到 4148 tokens 后，TTFT 从约 0.24s 增加到 1.45s，峰值显存从 0.96GB 增加到 3.15GB；但 decode 延迟基本保持在 18-20ms/token。这说明长上下文的主要成本集中在 prefill，decode 的稳定性主要来自 KV Cache。
+      </div>
+    </section>
+  </main>
+</body>
+</html>

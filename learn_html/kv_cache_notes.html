@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KV Cache 开关对比实验笔记</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #607086;
+      --line: #dbe3ef;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+      --ok: #047857;
+      --warn: #b45309;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+
+    header {
+      color: #fff;
+      background: linear-gradient(135deg, #173b70 0%, #2563eb 100%);
+      padding: 44px 24px;
+    }
+
+    header .wrap,
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 860px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 24px 56px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f7;
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.95em;
+    }
+
+    header code {
+      color: #123b82;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      font-weight: 700;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0;
+      padding: 16px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      margin: 14px 0;
+      border-collapse: collapse;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5fb;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .metric {
+      padding: 14px;
+      background: var(--accent-soft);
+      border: 1px solid #c7d8ff;
+      border-radius: 8px;
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--accent);
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .note {
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    @media (max-width: 760px) {
+      h1 {
+        font-size: 28px;
+      }
+
+      section {
+        padding: 18px;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>KV Cache 开关对比实验笔记</h1>
+      <p>
+        使用 Transformers 对比 <code>use_cache=True</code> 和 <code>use_cache=False</code>
+        的生成速度，理解大模型自回归推理中最基础、也最关键的优化机制。
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>一、核心结论</h2>
+      <p>
+        KV Cache 的作用是缓存历史 token 在注意力层中已经计算过的 Key 和 Value。
+        在生成新 token 时，模型只需要为新 token 计算新的 K/V，并和缓存中的历史 K/V 做注意力计算。
+      </p>
+      <p>
+        开启 KV Cache 后，decode 阶段可以避免反复重算历史上下文，因此生成速度通常更快。
+        关闭 KV Cache 后，每生成一个 token 都会重新计算从 prompt 到当前 token 的完整历史序列。
+      </p>
+
+      <div class="summary">
+        <div class="metric">
+          <strong>2.81x</strong>
+          <span>SmolLM2-1.7B 实测加速比</span>
+        </div>
+        <div class="metric">
+          <strong>16.60s</strong>
+          <span>SmolLM2 单次平均节省时间</span>
+        </div>
+        <div class="metric">
+          <strong>55.89</strong>
+          <span>SmolLM2 开启后 tokens/s</span>
+        </div>
+        <div class="metric">
+          <strong>512</strong>
+          <span>SmolLM2 实验生成 tokens</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>二、背景知识</h2>
+      <h3>1. 自回归生成</h3>
+      <p>
+        大语言模型生成文本时通常是自回归过程：先根据 prompt 预测第一个新 token，
+        再把这个 token 拼回上下文，继续预测下一个 token。这个过程会循环很多次。
+      </p>
+
+      <h3>2. Prefill 和 Decode</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>作用</th>
+            <th>特点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Prefill</td>
+            <td>一次性处理用户输入的 prompt</td>
+            <td>可以并行处理整段输入，主要影响首 token 延迟</td>
+          </tr>
+          <tr>
+            <td>Decode</td>
+            <td>逐个生成新 token</td>
+            <td>每一步依赖前一步结果，KV Cache 主要优化这个阶段</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3. KV Cache 为什么能加速</h3>
+      <p>
+        Transformer 的 attention 会把每个 token 映射成 Query、Key、Value。
+        在 decode 阶段，历史 token 的 Key 和 Value 已经计算过，并且不会因为新 token 到来而改变。
+        所以可以把它们缓存起来，后续生成时直接复用。
+      </p>
+
+      <div class="note">
+        <strong>直觉理解：</strong>
+        开启 KV Cache 就像给历史上下文做了中间结果缓存；关闭 KV Cache 则像每写一个新字，
+        都重新从文章开头读一遍并重新计算。
+      </div>
+    </section>
+
+    <section>
+      <h2>三、实验代码</h2>
+      <p>本次实验脚本位于 <code>cache/kv_cache_compare.py</code>，核心对比代码如下：</p>
+
+      <pre><code>outputs = model.generate(
+    **inputs,
+    max_new_tokens=256,
+    use_cache=True,
+)</code></pre>
+
+      <pre><code>outputs = model.generate(
+    **inputs,
+    max_new_tokens=256,
+    use_cache=False,
+)</code></pre>
+
+      <p>运行命令：</p>
+      <pre><code>python.exe cache\kv_cache_compare.py --model Qwen/Qwen2.5-0.5B-Instruct</code></pre>
+
+      <p>脚本会统计：</p>
+      <ul>
+        <li><code>latency</code>：生成总耗时。</li>
+        <li><code>tokens/s</code>：每秒生成 token 数。</li>
+        <li><code>peak_cuda_memory</code>：CUDA 峰值显存。</li>
+        <li><code>speedup</code>：开启 KV Cache 后的吞吐提升倍数。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>四、实测结果</h2>
+      <p>
+        本实验先用 <code>Qwen/Qwen2.5-0.5B-Instruct</code> 做小模型短输出对比，
+        再用 <code>HuggingFaceTB/SmolLM2-1.7B-Instruct</code> 和更长生成长度放大 KV Cache 的效果。
+      </p>
+
+      <h3>实验 1：Qwen2.5-0.5B，生成 256 tokens</h3>
+      <p>实验配置：<code>runs=3</code>，<code>max_new_tokens=256</code>，输入长度 <code>51</code> tokens。</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>配置</th>
+            <th>输入 tokens</th>
+            <th>生成 tokens</th>
+            <th>平均耗时</th>
+            <th>tokens/s</th>
+            <th>峰值显存</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="ok">use_cache=True</span></td>
+            <td>51</td>
+            <td>256</td>
+            <td>4.65s</td>
+            <td>55.03</td>
+            <td>0.94 GB</td>
+          </tr>
+          <tr>
+            <td><span class="warn">use_cache=False</span></td>
+            <td>51</td>
+            <td>256</td>
+            <td>5.28s</td>
+            <td>48.47</td>
+            <td>0.95 GB</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <pre><code>use_cache=True speedup: 1.14x
+latency saved per run: 0.63s</code></pre>
+
+      <p>
+        可以看到，开启 KV Cache 后，平均耗时从 <code>5.28s</code> 降到 <code>4.65s</code>，
+        吞吐从 <code>48.47 tokens/s</code> 提升到 <code>55.03 tokens/s</code>。
+      </p>
+
+      <h3>实验 2：SmolLM2-1.7B，生成 512 tokens</h3>
+      <p>运行命令：</p>
+      <pre><code>python.exe cache\kv_cache_compare.py --model HuggingFaceTB/SmolLM2-1.7B-Instruct --max-new-tokens 512</code></pre>
+      <p>实验配置：<code>runs=3</code>，<code>max_new_tokens=512</code>，输入长度 <code>76</code> tokens。</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>配置</th>
+            <th>输入 tokens</th>
+            <th>生成 tokens</th>
+            <th>平均耗时</th>
+            <th>tokens/s</th>
+            <th>峰值显存</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="ok">use_cache=True</span></td>
+            <td>76</td>
+            <td>512</td>
+            <td>9.16s</td>
+            <td>55.89</td>
+            <td>3.31 GB</td>
+          </tr>
+          <tr>
+            <td><span class="warn">use_cache=False</span></td>
+            <td>76</td>
+            <td>512</td>
+            <td>25.76s</td>
+            <td>19.87</td>
+            <td>3.23 GB</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <pre><code>use_cache=True speedup: 2.81x
+latency saved per run: 16.60s</code></pre>
+
+      <p>
+        这组结果更清楚地体现了 KV Cache 的收益：开启后平均耗时从 <code>25.76s</code>
+        降到 <code>9.16s</code>，吞吐从 <code>19.87 tokens/s</code> 提升到
+        <code>55.89 tokens/s</code>，加速达到 <code>2.81x</code>。
+      </p>
+    </section>
+
+    <section>
+      <h2>五、结果分析</h2>
+      <h3>为什么 Qwen2.5-0.5B 只快 1.14x</h3>
+      <ol>
+        <li>输入上下文较短，只有 51 个 input tokens，重复计算历史 token 的成本还不够大。</li>
+        <li>模型较小，Qwen2.5-0.5B 的计算量不高，KV Cache 的优势没有完全放大。</li>
+        <li>生成长度是 256，已经能看到差异，但 prompt 更长、生成更多 token 时通常更明显。</li>
+        <li>如果在 GPU 上运行，小模型的并行计算效率较高，关闭 cache 的惩罚会被部分掩盖。</li>
+      </ol>
+
+      <h3>为什么 SmolLM2-1.7B 能达到 2.81x</h3>
+      <ol>
+        <li>模型更大，单步 attention 和前向计算成本更高，重复计算历史上下文的代价更明显。</li>
+        <li>生成长度增加到 512 tokens，decode 步数更多，KV Cache 在每一步节省的计算会持续累积。</li>
+        <li>输入只有 76 tokens，prefill 占比不高，主要耗时来自 decode 阶段，正好命中 KV Cache 的优化重点。</li>
+        <li>开启 KV Cache 的显存峰值从 3.23 GB 增加到 3.31 GB，属于用少量显存换取大量计算时间。</li>
+      </ol>
+
+      <p>可以用更长生成长度进一步放大差异：</p>
+      <pre><code>python.exe cache\kv_cache_compare.py --model Qwen/Qwen2.5-0.5B-Instruct --max-new-tokens 512</code></pre>
+    </section>
+
+    <section>
+      <h2>六、实践意义</h2>
+      <p>
+        KV Cache 是大模型推理优化的核心基础之一。vLLM、TensorRT-LLM、SGLang 等推理框架都会围绕
+        KV Cache 做更进一步的优化，例如分页管理、显存复用、连续批处理和多请求调度。
+      </p>
+      <ul>
+        <li>单请求生成：KV Cache 减少重复计算，提高 decode 吞吐。</li>
+        <li>长上下文生成：历史 token 越多，缓存带来的收益越明显。</li>
+        <li>服务化推理：多个请求并发时，KV Cache 的显存管理会直接影响吞吐和稳定性。</li>
+      </ul>
+
+      <div class="note">
+        <strong>一句话总结：</strong>
+        <code>use_cache=True</code> 让模型复用历史 token 的 K/V 中间结果；
+        <code>use_cache=False</code> 会在生成过程中重复计算历史上下文，所以更慢。
+      </div>
+    </section>
+  </main>
+</body>
+</html>
