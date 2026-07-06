@@ -294,43 +294,8 @@ OpenAI API 兼容服务
 
 ---
 
-## 七、阶段 5：TensorRT-LLM 是否要学？
 
-可以了解，但不建议你一开始深挖。
-
-原因是：
-
-```text
-环境复杂
-显卡消费级
-Windows 环境容易折腾
-需要 CUDA / TensorRT / 构建 engine
-学习成本高
-```
-
-更合理的顺序是：
-
-```text
-Transformers 推理
-↓
-LoRA / QLoRA 微调
-↓
-量化 / KV Cache / Prefill Decode
-↓
-vLLM 部署
-↓
-TensorRT-LLM 原理了解
-```
-
-TensorRT-LLM 你面试时可以说：
-
-> 我目前主要实操过 Transformers 和 vLLM，理解 KV Cache、PagedAttention、Continuous Batching、量化和推理服务指标。TensorRT-LLM 我了解其通过 kernel fusion、engine 编译、FP16/INT8/FP8 优化提升推理性能，后续会继续深入。
-
-这样就够用了。
-
----
-
-## 八、你可以做一个完整 Demo 项目
+## 七、你可以做一个完整 Demo 项目
 
 我建议你做一个项目，名字可以叫：
 
@@ -338,89 +303,81 @@ TensorRT-LLM 你面试时可以说：
 llm-infra-lab
 ```
 
-目录结构：
+
+
+### 当前项目框架代码说明
+
+这个仓库可以按“推理 -> 微调 -> 部署 -> 量化 -> 原理实现”的顺序推进。每个目录都对应一个 AI Infra 入门核心能力点：
 
 ```text
 llm-infra-lab/
-├── inference/
-│   ├── transformers_infer.py
-│   ├── kv_cache_test.py
-│   ├── benchmark_ttft.py
+├── inference/                 # Transformers 本地推理与性能实验
+│   ├── transformers_infer.py   # 加载 Qwen 小模型，完成一次本地问答，并输出 tokens/s、显存等指标
+│   ├── kv_cache_test.py        # 对比 use_cache=True / False，观察 KV Cache 对 decode 速度的影响
+│   └── benchmark_ttft.py       # 用流式输出拆分 TTFT、decode tokens/s、总延迟
 │
-├── finetune/
-│   ├── train_lora.py
-│   ├── dataset.jsonl
-│   ├── merge_lora.py
+├── finetune/                   # LoRA / QLoRA 微调实验
+│   ├── dataset.jsonl           # 少量 instruction/output 样本，用来验证微调流程
+│   ├── train_lora.py           # 使用 PEFT + TRL 对 Qwen2.5-0.5B 做 LoRA 微调
+│   └── merge_lora.py           # 将 LoRA adapter 合并回 base model，便于部署或单独加载
 │
-├── serving/
-│   ├── vllm_server.md
-│   ├── openai_client.py
+├── serving/                    # 推理服务化
+│   ├── vllm_server.md          # vLLM 启动命令、观察指标和实验说明
+│   └── openai_client.py        # 调用 vLLM OpenAI-compatible API 的客户端示例
 │
-├── quantization/
-│   ├── int4_infer.md
-│   ├── gguf_test.md
+├── quantization/               # 量化推理实验
+│   ├── int4_infer.md           # Transformers + bitsandbytes 4bit 量化说明
+│   └── gguf_test.md            # GGUF / llama.cpp 路线说明和对比指标
 │
-├── mini_gpt/
-│   ├── model.py
-│   ├── train.py
-│   ├── generate.py
+├── mini_gpt/                   # 从零实现一个最小 GPT
+│   ├── model.py                # Embedding、Causal Self-Attention、MLP、Block、MiniGPT
+│   ├── train.py                # 字符级语言模型训练脚本，观察 loss 下降
+│   └── generate.py             # 加载 checkpoint 做文本生成
 │
-└── README.md
+├── outputs/                    # 运行后生成的模型、adapter、checkpoint，建议不提交到 Git
+├── Plan.md                     # 学习路线与项目规划
+└── README.md                   # 项目入口、运行命令和实验清单
 ```
 
-README 里面写清楚：
+### 推荐运行顺序
+
+先跑最轻量的本地推理，确认 CUDA、PyTorch、Transformers、模型下载都正常：
+
+```bash
+python inference/transformers_infer.py --model Qwen/Qwen2.5-0.5B-Instruct
+```
+
+然后做 KV Cache 和 TTFT 实验：
+
+```bash
+python inference/kv_cache_test.py --model Qwen/Qwen2.5-0.5B-Instruct
+python inference/benchmark_ttft.py --model Qwen/Qwen2.5-0.5B-Instruct
+```
+
+微调部分建议从 0.5B 开始，先用几十条样本验证流程，不追求效果：
+
+```bash
+python finetune/train_lora.py --model Qwen/Qwen2.5-0.5B-Instruct
+python finetune/merge_lora.py --base-model Qwen/Qwen2.5-0.5B-Instruct
+```
+
+原理部分可以独立跑 mini GPT：
+
+```bash
+python mini_gpt/train.py --steps 500
+python mini_gpt/generate.py --checkpoint outputs/mini_gpt.pt --prompt AI
+```
+
+### 每个模块要沉淀的能力
 
 ```text
-1. 本地推理实验
-2. KV Cache 对比实验
-3. Prefill / Decode 性能分析
-4. LoRA 微调实验
-5. vLLM 服务化部署
-6. 小型 Transformer 从零训练
+inference：会解释模型加载、显存占用、tokens/s、TTFT、TPOT。
+finetune：会解释 LoRA 为什么省显存，adapter 和 base model 是什么关系。
+serving：会解释 OpenAI 兼容接口、continuous batching、PagedAttention。
+quantization：会解释 FP16/INT4/GGUF 的显存和效果取舍。
+mini_gpt：会解释 attention、causal mask、loss、反向传播和自回归生成。
 ```
 
 这个项目对你找 AI Infra / AI 应用开发岗位非常有帮助。
 
 ---
-
-## 九、面试时怎么描述这个 Demo？
-
-可以这样说：
-
-我自己做过一个学习型的大模型 Infra Demo，主要目标不是训练一个大模型，而是理解大模型推理和微调的底层机制。
-
-在本地 RTX 4060 8GB 环境下，我使用 Qwen 0.5B / 1.5B 做了 Transformers 推理和 LoRA 微调实验，观察了显存占用、生成速度、输入长度对延迟的影响。
-
-同时我做了 KV Cache 开关对比，理解了为什么开启 KV Cache 后 decode 阶段可以减少重复计算。我还记录了 TTFT、tokens/s、总延迟等指标，用来区分 prefill 和 decode 的性能瓶颈。
-
-另外我尝试用 vLLM 部署小模型，了解 PagedAttention、Continuous Batching 和 OpenAI 兼容接口。为了理解训练原理，我也实现过一个最小 GPT，用小文本训练字符级语言模型，主要用于理解 attention、causal mask、loss 和反向传播流程。
-
-这段你以后面试可以直接用。
-
----
-
-## 十、最终建议
-
-你现在最应该做的是：
-
-```text
-不是从零训练大模型
-而是：
-1. 微调一个小模型
-2. 部署一个小模型
-3. 做推理加速实验
-4. 从零实现一个迷你 Transformer
-```
-
-优先级如下：
-
-```text
-第一优先级：Qwen2.5-1.5B LoRA 微调
-第二优先级：KV Cache / Prefill Decode benchmark
-第三优先级：vLLM 部署小模型
-第四优先级：mini GPT 从零训练
-第五优先级：TensorRT-LLM 原理学习
-```
-
-你的电脑完全够做这些 Demo。
-这些 Demo 虽然是实验性质，但已经足够支撑你理解 **AI Infra 入门核心原理**，也能让你面试时从“只会调用模型 API”提升到“理解推理、微调和部署链路”。

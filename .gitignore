@@ -1,0 +1,17 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+data/
+alpaca_gpt4_data_zh/
+finetune/dataset.jsonl
+
+qwen-lora/
+qwen-lora-adapter/
+outputs/
+
+*.safetensors
+*.bin
+*.pt
+*.pth

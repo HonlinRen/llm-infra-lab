@@ -1,0 +1,10 @@
+torch
+transformers
+accelerate
+datasets
+peft
+trl
+bitsandbytes
+openai
+sentencepiece
+safetensors

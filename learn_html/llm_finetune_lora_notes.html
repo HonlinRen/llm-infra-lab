@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>大模型 LoRA 微调学习笔记</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5f6b7a;
+      --line: #dde3ec;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --code-bg: #0f172a;
+      --code-text: #e5e7eb;
+      --ok: #047857;
+      --warn: #b45309;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+
+    header {
+      background: linear-gradient(135deg, #123b82 0%, #2563eb 100%);
+      color: #fff;
+      padding: 44px 24px;
+    }
+
+    header .wrap,
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 780px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 24px 56px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f7;
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0;
+      padding: 16px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      list-style: none;
+      margin: 0;
+    }
+
+    .toc li {
+      margin: 0;
+    }
+
+    .toc a {
+      display: block;
+      padding: 10px 12px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    .callout {
+      margin: 12px 0;
+      padding: 12px 14px;
+      background: #f8fafc;
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>大模型 LoRA 微调学习笔记</h1>
+      <p>基于 Qwen2.5-0.5B-Instruct 和中文 Alpaca GPT-4 数据集，记录一次从数据准备、LoRA 训练、GPU 排查到 adapter 推理验证的完整实践。</p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>目录</h2>
+      <ul class="toc">
+        <li><a href="#goal">1. 本次目标</a></li>
+        <li><a href="#concepts">2. 必学知识点</a></li>
+        <li><a href="#data">3. 数据准备</a></li>
+        <li><a href="#train">4. LoRA 微调流程</a></li>
+        <li><a href="#metrics">5. 训练日志怎么看</a></li>
+        <li><a href="#gpu">6. GPU 是否用起来</a></li>
+        <li><a href="#infer">7. 使用微调后的模型</a></li>
+        <li><a href="#troubleshooting">8. 常见问题</a></li>
+      </ul>
+    </section>
+
+    <section id="goal">
+      <h2>1. 本次目标</h2>
+      <p>本次实践的目标不是训练一个很强的生产模型，而是跑通大模型微调的核心链路：</p>
+      <ul>
+        <li>使用数据集 <code>llm-wizard/alpaca-gpt4-data-zh</code>。</li>
+        <li>抽取前 500 条中文指令数据，保存到 <code>./data/alpaca_500</code>。</li>
+        <li>使用 <code>Qwen/Qwen2.5-0.5B-Instruct</code> 作为基座模型。</li>
+        <li>通过 LoRA 训练 adapter，而不是全量更新模型权重。</li>
+        <li>训练完成后加载 <code>./qwen-lora-adapter</code> 做推理。</li>
+        <li>排查 PyTorch CPU 版导致 GPU 没用上的问题，并切换到 CUDA 版 PyTorch。</li>
+      </ul>
+    </section>
+
+    <section id="concepts">
+      <h2>2. 必学知识点</h2>
+
+      <h3>基座模型和微调模型</h3>
+      <p>基座模型是预训练或指令微调过的原始模型，例如 <code>Qwen/Qwen2.5-0.5B-Instruct</code>。LoRA 微调不会直接改写完整基座模型，而是额外训练一小组低秩矩阵，称为 adapter。</p>
+
+      <h3>LoRA 是什么</h3>
+      <p>LoRA 的核心思想是冻结大模型大部分参数，只在注意力层等关键模块旁边插入少量可训练参数。这样可以显著降低显存和训练成本。</p>
+      <ul>
+        <li><code>r</code>：LoRA 的秩，越大表达能力越强，但参数更多。</li>
+        <li><code>lora_alpha</code>：缩放系数，控制 LoRA 更新的强度。</li>
+        <li><code>target_modules</code>：LoRA 插入到哪些线性层，本次使用 <code>q_proj</code>、<code>k_proj</code>、<code>v_proj</code>、<code>o_proj</code>。</li>
+        <li><code>lora_dropout</code>：训练时的 dropout，用于缓解过拟合。</li>
+      </ul>
+
+      <h3>为什么 adapter 不是完整模型</h3>
+      <p>训练输出的 <code>adapter_model.safetensors</code> 只有几 MB，因为它只保存 LoRA 参数。推理时必须同时加载基座模型和 adapter：</p>
+      <pre><code>微调后模型 = Qwen/Qwen2.5-0.5B-Instruct + ./qwen-lora-adapter</code></pre>
+
+      <h3>SFT 是什么</h3>
+      <p>SFT 即 Supervised Fine-Tuning，监督微调。它使用指令和答案样本，让模型学习按照指定格式回答问题。本次数据字段是 <code>instruction</code>、<code>input</code>、<code>output</code>。</p>
+    </section>
+
+    <section id="data">
+      <h2>3. 数据准备</h2>
+      <p>本次使用 Hugging Face 数据集 <code>llm-wizard/alpaca-gpt4-data-zh</code>，只取前 500 条做快速实验。</p>
+      <pre><code>from datasets import load_dataset
+
+dataset = load_dataset("llm-wizard/alpaca-gpt4-data-zh")
+
+small = dataset["train"].select(range(500))
+small.save_to_disk("./data/alpaca_500")</code></pre>
+
+      <p>保存后的数据可以通过 <code>load_from_disk</code> 读取：</p>
+      <pre><code>from datasets import load_from_disk
+
+dataset = load_from_disk("./data/alpaca_500")
+print(dataset)
+print(dataset.column_names)</code></pre>
+
+      <div class="callout">
+        本次确认数据共有 500 条，字段为 <code>instruction</code>、<code>input</code>、<code>output</code>。
+      </div>
+
+      <h3>Prompt 格式</h3>
+      <p>训练时需要把结构化字段拼成模型可以学习的文本格式：</p>
+      <pre><code>def format_prompt(example):
+    instruction = example["instruction"]
+    input_text = example.get("input", "")
+    output = example["output"]
+
+    if input_text:
+        return (
+            f"### Instruction:\n{instruction}\n\n"
+            f"### Input:\n{input_text}\n\n"
+            f"### Response:\n{output}"
+        )
+
+    return f"### Instruction:\n{instruction}\n\n### Response:\n{output}"</code></pre>
+    </section>
+
+    <section id="train">
+      <h2>4. LoRA 微调流程</h2>
+      <p>核心训练脚本位于 <code>serving/qwen_llm.py</code>。主要步骤如下：</p>
+      <ol>
+        <li>加载 tokenizer。</li>
+        <li>加载 Qwen2.5-0.5B-Instruct 基座模型。</li>
+        <li>读取 <code>./data/alpaca_500</code>，如果不存在则从 Hugging Face 下载并保存。</li>
+        <li>配置 LoRA。</li>
+        <li>配置训练参数。</li>
+        <li>使用 <code>SFTTrainer</code> 训练。</li>
+        <li>保存 adapter 到 <code>./qwen-lora-adapter</code>。</li>
+      </ol>
+
+      <h3>运行训练</h3>
+      <pre><code>python .\serving\qwen_llm.py</code></pre>
+
+      <h3>关键训练配置</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>参数</th>
+            <th>本次值</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>per_device_train_batch_size</code></td>
+            <td>1</td>
+            <td>单张 GPU 每步处理的样本数。显存够时可以尝试调到 2 或 4。</td>
+          </tr>
+          <tr>
+            <td><code>gradient_accumulation_steps</code></td>
+            <td>8</td>
+            <td>梯度累积步数。等效 batch size 约为 <code>1 * 8 = 8</code>。</td>
+          </tr>
+          <tr>
+            <td><code>learning_rate</code></td>
+            <td>2e-4</td>
+            <td>LoRA 微调常用学习率，比全量微调通常更大。</td>
+          </tr>
+          <tr>
+            <td><code>num_train_epochs</code></td>
+            <td>3</td>
+            <td>数据集完整训练 3 轮。</td>
+          </tr>
+          <tr>
+            <td><code>fp16</code></td>
+            <td>有 CUDA 时开启</td>
+            <td>降低显存占用并提升训练速度。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="metrics">
+      <h2>5. 训练日志怎么看</h2>
+      <p>训练过程中会看到类似日志：</p>
+      <pre><code>{'loss': '1.852', 'grad_norm': '0.8231', 'learning_rate': '0.0001587',
+ 'entropy': '1.955', 'num_tokens': '4.461e+04',
+ 'mean_token_accuracy': '0.5686', 'epoch': '0.64'}</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>含义</th>
+            <th>怎么看</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>loss</code></td>
+            <td>训练损失，表示模型预测错误程度。</td>
+            <td>整体下降是好信号，单个 step 波动正常。</td>
+          </tr>
+          <tr>
+            <td><code>grad_norm</code></td>
+            <td>梯度范数，表示参数更新力度。</td>
+            <td>本次约 0.6 到 1.5，正常。几十、几百或 NaN 才危险。</td>
+          </tr>
+          <tr>
+            <td><code>learning_rate</code></td>
+            <td>学习率，控制每次更新步子大小。</td>
+            <td>本次从约 2e-4 逐步下降，说明调度器在工作。</td>
+          </tr>
+          <tr>
+            <td><code>entropy</code></td>
+            <td>输出分布的不确定性。</td>
+            <td>辅助观察即可，不如 loss 重要。</td>
+          </tr>
+          <tr>
+            <td><code>num_tokens</code></td>
+            <td>累计训练过的 token 数。</td>
+            <td>用于理解训练规模。</td>
+          </tr>
+          <tr>
+            <td><code>mean_token_accuracy</code></td>
+            <td>token 级预测准确率。</td>
+            <td>本次从约 0.52 到 0.60，有上升迹象。</td>
+          </tr>
+          <tr>
+            <td><code>epoch</code></td>
+            <td>训练轮数进度。</td>
+            <td><code>epoch: 3</code> 表示 3 轮训练完成。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>本次训练结果</h3>
+      <pre><code>{'train_runtime': '202.3',
+ 'train_samples_per_second': '7.413',
+ 'train_steps_per_second': '0.934',
+ 'train_loss': '1.852',
+ 'entropy': '1.862',
+ 'num_tokens': '2.132e+05',
+ 'mean_token_accuracy': '0.5986',
+ 'epoch': '3'}</code></pre>
+      <p><span class="ok">结论：</span>训练正常结束，3 个 epoch 完成，adapter 已保存。</p>
+    </section>
+
+    <section id="gpu">
+      <h2>6. GPU 是否用起来</h2>
+      <p>一开始训练日志出现过：</p>
+      <pre><code>UserWarning: 'pin_memory' argument is set as true but no accelerator is found</code></pre>
+      <p>这表示 PyTorch 没识别到 CUDA。排查后发现安装的是 CPU 版 PyTorch：</p>
+      <pre><code>torch 2.12.1+cpu
+cuda available False
+torch cuda build None
+device count 0</code></pre>
+
+      <h3>修复方式</h3>
+      <p>卸载 CPU 版 PyTorch，安装 CUDA 版 PyTorch：</p>
+      <pre><code>.\.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio
+.\.venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126</code></pre>
+
+      <p>验证 CUDA：</p>
+      <pre><code>.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.version.cuda); print(torch.cuda.get_device_name(0))"</code></pre>
+
+      <h3>nvidia-smi 怎么看</h3>
+      <p>训练真正用上 GPU 时，<code>nvidia-smi</code> 里会看到：</p>
+      <ul>
+        <li><code>python.exe</code> 出现在 Processes 里。</li>
+        <li>进程 Type 是 <code>C</code>，表示 CUDA Compute。</li>
+        <li>显存占用明显增加，例如约 4GB。</li>
+        <li><code>GPU-Util</code> 有持续波动，例如 40% 左右。</li>
+      </ul>
+
+      <div class="callout">
+        任务管理器默认显示的 3D 利用率不一定能反映深度学习负载。判断训练是否用上 GPU，优先看 <code>nvidia-smi</code> 和 PyTorch 的 <code>torch.cuda.is_available()</code>。
+      </div>
+    </section>
+
+    <section id="infer">
+      <h2>7. 使用微调后的模型</h2>
+      <p>训练结束后，adapter 位于：</p>
+      <pre><code>./qwen-lora-adapter</code></pre>
+      <p>目录中关键文件包括：</p>
+      <ul>
+        <li><code>adapter_config.json</code>：LoRA 配置。</li>
+        <li><code>adapter_model.safetensors</code>：LoRA 权重。</li>
+        <li><code>tokenizer.json</code>、<code>tokenizer_config.json</code>：tokenizer 相关文件。</li>
+      </ul>
+
+      <h3>加载 adapter 推理</h3>
+      <pre><code>import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+
+base_model = "Qwen/Qwen2.5-0.5B-Instruct"
+adapter_path = "./qwen-lora-adapter"
+
+tokenizer = AutoTokenizer.from_pretrained(adapter_path, trust_remote_code=True)
+
+model = AutoModelForCausalLM.from_pretrained(
+    base_model,
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    device_map="auto",
+    trust_remote_code=True,
+)
+
+model = PeftModel.from_pretrained(model, adapter_path)
+model.eval()
+
+question = "保持健康的三个提示。"
+
+messages = [{"role": "user", "content": question}]
+text = tokenizer.apply_chat_template(
+    messages,
+    tokenize=False,
+    add_generation_prompt=True,
+)
+
+inputs = tokenizer(text, return_tensors="pt").to(model.device)
+
+with torch.inference_mode():
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=256,
+        do_sample=True,
+        temperature=0.7,
+        top_p=0.9,
+    )
+
+answer_ids = outputs[0][inputs["input_ids"].shape[-1]:]
+answer = tokenizer.decode(answer_ids, skip_special_tokens=True)
+print(answer)</code></pre>
+
+      <h3>如何确认不是原始 Qwen</h3>
+      <p>推理脚本中加入：</p>
+      <pre><code>print(type(model))
+print(model.peft_config)
+print("active adapters:", model.active_adapters())</code></pre>
+
+      <p>如果看到下面信息，就说明已经加载 LoRA：</p>
+      <pre><code>&lt;class 'peft.peft_model.PeftModelForCausalLM'&gt;
+peft_type=&lt;PeftType.LORA: 'LORA'&gt;
+base_model_name_or_path='Qwen/Qwen2.5-0.5B-Instruct'
+target_modules={'q_proj', 'k_proj', 'v_proj', 'o_proj'}</code></pre>
+
+      <div class="callout">
+        单看回答内容无法证明是否加载了微调模型，因为原始 Qwen 也能回答常见问题。更可靠的方式是检查模型类型、LoRA 配置和 active adapter。
+      </div>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>8. 常见问题</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>现象</th>
+            <th>原因</th>
+            <th>处理方式</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GPU 显示有占用，但训练很慢</td>
+            <td>可能只是桌面程序占用显存，PyTorch 没用 CUDA。</td>
+            <td>运行 <code>torch.cuda.is_available()</code>，确认是否为 <code>True</code>。</td>
+          </tr>
+          <tr>
+            <td><code>torch 2.x + cpu</code></td>
+            <td>安装了 CPU 版 PyTorch。</td>
+            <td>卸载后安装 CUDA 版 PyTorch。</td>
+          </tr>
+          <tr>
+            <td><code>triton not found</code></td>
+            <td>缺少 Triton，FLOPs 统计不可用。</td>
+            <td>一般不影响训练或推理，可以暂时忽略。</td>
+          </tr>
+          <tr>
+            <td><code>torch_dtype is deprecated</code></td>
+            <td>Transformers 新版本提示参数名变化。</td>
+            <td>当前不影响运行。后续可以把 <code>torch_dtype</code> 改成 <code>dtype</code>。</td>
+          </tr>
+          <tr>
+            <td>不知道是不是微调后的模型</td>
+            <td>原始模型和微调模型回答可能相似。</td>
+            <td>打印 <code>type(model)</code> 和 <code>model.peft_config</code>，确认是 <code>PeftModelForCausalLM</code>。</td>
+          </tr>
+          <tr>
+            <td>adapter 文件很小</td>
+            <td>LoRA 只保存少量额外参数。</td>
+            <td>这是正常现象。推理时必须同时加载基座模型。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>下一步学习建议</h3>
+      <ul>
+        <li>尝试对比原始 Qwen 和 LoRA 模型在同一问题上的输出差异。</li>
+        <li>把 <code>do_sample=False</code> 用于确定性对比，减少随机采样影响。</li>
+        <li>尝试调整 <code>batch_size</code>、<code>learning_rate</code>、<code>epochs</code>，观察 loss 和输出变化。</li>
+        <li>学习 LoRA 合并，把 adapter merge 到完整模型中，便于独立部署。</li>
+        <li>准备更贴近真实业务的数据集，而不是只用通用问答样本。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
