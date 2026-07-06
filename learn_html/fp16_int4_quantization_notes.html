@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FP16 vs INT4 量化推理实验笔记</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #607086;
+      --line: #dbe3ef;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+      --ok: #047857;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+
+    header {
+      color: #fff;
+      background: linear-gradient(135deg, #173b70 0%, #2563eb 100%);
+      padding: 44px 24px;
+    }
+
+    header .wrap,
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 860px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 24px 56px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f7;
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0;
+      padding: 16px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      margin: 14px 0;
+      border-collapse: collapse;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5fb;
+      font-weight: 700;
+    }
+
+    .lead {
+      font-size: 17px;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 16px 0 4px;
+    }
+
+    .metric {
+      padding: 16px;
+      background: var(--accent-soft);
+      border: 1px solid #c7d7fe;
+      border-radius: 8px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 24px;
+      color: var(--accent);
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #1d4ed8;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .note {
+      margin: 12px 0;
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: #f8fbff;
+      border-radius: 6px;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .bad {
+      color: var(--bad);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    @media (max-width: 820px) {
+      .grid,
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        padding: 34px 18px;
+      }
+
+      main {
+        padding: 20px 16px 44px;
+      }
+
+      section {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>FP16 vs INT4 量化推理实验笔记</h1>
+      <p>围绕显存占用、加载速度、推理速度和回答质量，对比普通 FP16 推理与 bitsandbytes INT4 量化推理，并沉淀可用于面试表达的结论。</p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 一句话结论</h2>
+      <p class="lead">
+        INT4 量化的核心价值是用更低精度表示模型权重，显著降低显存占用；代价是加载和推理时可能引入反量化、低比特 kernel 等额外开销，因此不保证一定比 FP16 更快，并且可能带来一定回答质量损失。
+      </p>
+      <div class="metric-grid">
+        <div class="metric">
+          显存占用
+          <strong>-67%</strong>
+          <span class="muted">3.19GB 到 1.04GB</span>
+        </div>
+        <div class="metric">
+          加载速度
+          <strong>INT4 更慢</strong>
+          <span class="muted">2.85s 到 4.52s</span>
+        </div>
+        <div class="metric">
+          推理速度
+          <strong>-21%</strong>
+          <span class="muted">53.61 到 42.32 tokens/s</span>
+        </div>
+        <div class="metric">
+          回答质量
+          <strong>无崩坏</strong>
+          <span class="muted">但准确性受模型能力限制</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 背景知识</h2>
+      <div class="grid">
+        <div>
+          <h3>FP16 推理</h3>
+          <ul>
+            <li>权重通常以 16-bit 浮点数存储和计算。</li>
+            <li>实现简单，GPU 支持成熟，速度通常比较稳定。</li>
+            <li>显存占用较高，模型越大越容易受显存限制。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>INT4 量化推理</h3>
+          <ul>
+            <li>权重以 4-bit 形式存储，常见方案包括 NF4 等。</li>
+            <li>显存占用明显降低，更适合消费级 GPU 或多模型部署。</li>
+            <li>实际计算时可能需要反量化到 FP16/BF16，速度不一定提升。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note">
+        本实验使用 Transformers + bitsandbytes 的 4bit 加载方式：<code>load_in_4bit=True</code>、<code>bnb_4bit_quant_type="nf4"</code>、<code>bnb_4bit_compute_dtype=torch.float16</code>。
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 实验配置</h2>
+      <table>
+        <tr>
+          <th>项目</th>
+          <th>内容</th>
+        </tr>
+        <tr>
+          <td>测试模型</td>
+          <td><code>HuggingFaceTB/SmolLM2-1.7B-Instruct</code></td>
+        </tr>
+        <tr>
+          <td>对比模式</td>
+          <td><code>fp16</code> 与 <code>int4</code></td>
+        </tr>
+        <tr>
+          <td>输入 token</td>
+          <td>54</td>
+        </tr>
+        <tr>
+          <td>输出 token</td>
+          <td>256，两种模式保持一致</td>
+        </tr>
+        <tr>
+          <td>结果文件</td>
+          <td><code>quantization/smollm2_1_7b_result.json</code></td>
+        </tr>
+      </table>
+      <pre><code>python quantization/int4_compare.py \
+  --model HuggingFaceTB/SmolLM2-1.7B-Instruct \
+  --json-output quantization/smollm2_1_7b_result.json</code></pre>
+    </section>
+
+    <section>
+      <h2>4. 实测结果</h2>
+      <table>
+        <tr>
+          <th>指标</th>
+          <th>FP16</th>
+          <th>INT4</th>
+          <th>观察</th>
+        </tr>
+        <tr>
+          <td>加载时间</td>
+          <td>2.85s</td>
+          <td>4.52s</td>
+          <td><span class="warn">INT4 慢约 59%</span>。量化加载需要额外处理，不一定比 FP16 更快。</td>
+        </tr>
+        <tr>
+          <td>加载后显存 allocated</td>
+          <td>3.19GB</td>
+          <td>1.04GB</td>
+          <td><span class="ok">INT4 省约 67%</span>，这是本实验最明显收益。</td>
+        </tr>
+        <tr>
+          <td>峰值显存 allocated</td>
+          <td>3.27GB</td>
+          <td>1.11GB</td>
+          <td><span class="ok">INT4 省约 66%</span>，峰值压力也明显下降。</td>
+        </tr>
+        <tr>
+          <td>生成耗时</td>
+          <td>4.78s</td>
+          <td>6.05s</td>
+          <td><span class="warn">INT4 更慢</span>，说明本环境下速度瓶颈不只在显存。</td>
+        </tr>
+        <tr>
+          <td>生成速度</td>
+          <td>53.61 tokens/s</td>
+          <td>42.32 tokens/s</td>
+          <td><span class="warn">INT4 慢约 21%</span>，小模型上低比特推理未必占优。</td>
+        </tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. 怎么解释这些现象</h2>
+      <h3>为什么 INT4 显存更低？</h3>
+      <p>
+        FP16 每个权重约占 16 bit，而 INT4 每个权重约占 4 bit。虽然实际还会有量化 scale、zero point 或分组元数据等额外开销，但总体权重显存仍会明显下降。本实验里加载后显存从 <code>3.19GB</code> 降到 <code>1.04GB</code>，说明权重量化带来了非常直接的显存收益。
+      </p>
+
+      <h3>为什么 INT4 不一定更快？</h3>
+      <p>
+        低比特权重减少了显存读取量，但 Transformers + bitsandbytes 的 4bit 推理通常不是全程原生 INT4 矩阵计算。实际推理中可能需要把 4bit 权重反量化到 FP16/BF16 后再参与计算，或者调用特定低比特 kernel。对于 1.7B 这种相对小的模型，反量化和 kernel 开销可能超过省下来的显存带宽收益，因此 tokens/s 反而低于 FP16。
+      </p>
+
+      <h3>为什么加载速度也可能变慢？</h3>
+      <p>
+        INT4 加载时不仅要读取权重，还要构建量化线性层、读取或生成量化相关元数据，并完成 device map 分配。相比直接加载 FP16 权重，这些步骤会带来额外耗时。本次复跑后 FP16 加载约 <code>2.85s</code>，INT4 约 <code>4.52s</code>。
+      </p>
+    </section>
+
+    <section>
+      <h2>6. 回答质量分析</h2>
+      <p>
+        两种模式都能输出完整英文回答，没有明显乱码、格式崩坏或重复循环；但它们对 KV Cache 的解释都不够准确。模型把 KV Cache 说成“缓存 previous inference tasks”或“缓存训练数据/常用信息”，这偏离了 LLM 推理里的真实含义。
+      </p>
+      <div class="note">
+        准确说法：KV Cache 缓存 Transformer 每一层历史 token 的 Key/Value 张量，使自回归 decode 阶段生成下一个 token 时不必重复计算所有历史 token 的 K/V；代价是上下文越长，KV Cache 占用显存越多。
+      </div>
+      <table>
+        <tr>
+          <th>模式</th>
+          <th>质量观察</th>
+        </tr>
+        <tr>
+          <td>FP16</td>
+          <td>表达更稳定，但把 KV Cache 泛化成“缓存以前推理任务结果”，概念不准确。</td>
+        </tr>
+        <tr>
+          <td>INT4</td>
+          <td>没有明显崩坏，但同样出现概念偏差，并且把 cache 与训练数据访问混在一起。</td>
+        </tr>
+      </table>
+      <p>
+        因此，本次质量结论应写成：<strong>INT4 未出现明显灾难性退化，但在事实准确性上 FP16 和 INT4 都受 1.7B 小模型本身能力限制。</strong>
+      </p>
+    </section>
+
+    <section>
+      <h2>7. 实践注意事项</h2>
+      <ul>
+        <li>首次运行如果包含模型下载，加载时间会被网络和缓存污染；要复跑一次再记录加载速度。</li>
+        <li>显存建议同时记录 <code>memory_allocated</code>、<code>memory_reserved</code> 和 <code>max_memory_allocated</code>。</li>
+        <li>比较生成速度时，输入 prompt、<code>max_new_tokens</code>、采样参数要保持一致。</li>
+        <li>回答质量不能只看是否能输出，还要检查事实准确性、完整性、是否有幻觉或概念混淆。</li>
+        <li>INT4 更适合显存紧张、模型更大、部署密度更高的场景；小模型单卡测速时不一定更快。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>8. 面试表达</h2>
+      <p>
+        可以这样说：
+      </p>
+      <div class="note">
+        我做过 FP16 和 INT4 的量化推理对比。以 SmolLM2-1.7B-Instruct 为例，INT4 把加载后显存从约 3.19GB 降到 1.04GB，峰值显存从约 3.27GB 降到 1.11GB，显存节省约三分之二。但在这台机器上，INT4 的生成速度从 53.61 tokens/s 降到 42.32 tokens/s，加载也从 2.85s 增加到 4.52s。我的理解是，INT4 主要降低权重显存和访存压力，但 bitsandbytes 4bit 推理存在反量化和 kernel 开销，小模型上不一定能换来速度提升。质量方面没有明显格式崩坏，但准确性仍取决于模型本身能力和量化误差，需要结合任务人工评估。
+      </div>
+    </section>
+  </main>
+</body>
+</html>
