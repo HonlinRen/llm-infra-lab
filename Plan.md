@@ -12,7 +12,7 @@
 
 ---
 
-## 一、你的机器能做什么？
+## 你的机器能做什么？
 
 你的 RTX 4060 是 **8GB 显存**，这个限制很关键。
 
@@ -26,11 +26,10 @@
 | 微调 7B 模型            |   勉强 | 需要 QLoRA、低 batch，速度慢     |
 | 本地推理 7B 量化模型        |   可以 | 4bit / GGUF 比较合适         |
 | vLLM 部署             | 可以尝试 | 8GB 显存限制较大，但能学流程         |
-| TensorRT-LLM        | 可以了解 | 实操门槛高，环境复杂，不是第一优先级       |
 
 ---
 
-## 二、AI Infra 学习不等于“自己训练大模型”
+## AI Infra 学习不等于“自己训练大模型”
 
 很多人误解 AI Infra，以为必须会训练模型。其实对于你目标的岗位，比如：
 
@@ -54,7 +53,7 @@ LoRA 为什么能低成本微调
 
 ---
 
-## 三、推荐你的学习路线
+## 推荐你的学习路线
 
 ### 阶段 1：先跑通本地推理
 
@@ -115,7 +114,7 @@ max_new_tokens 越大，生成时间是否增加
 
 ---
 
-## 四、阶段 2：做 LoRA / QLoRA 微调 Demo
+## 阶段 2：做 LoRA / QLoRA 微调 Demo
 
 这个非常适合你现在的目标。
 
@@ -149,7 +148,7 @@ Qwen2.5-0.5B / 1.5B
 
 ---
 
-## 五、阶段 3：自己训练一个“迷你 Transformer”
+## 阶段 3：自己训练一个“迷你 Transformer”
 
 这个不是为了工作直接用，而是为了理解原理。
 
@@ -184,7 +183,7 @@ Cross Entropy Loss
 
 ---
 
-## 六、阶段 4：做推理加速实验
+## 阶段 4：做推理加速实验
 
 这是最贴近 AI Infra 的部分。
 
@@ -295,7 +294,7 @@ OpenAI API 兼容服务
 ---
 
 
-## 七、你可以做一个完整 Demo 项目
+## 你可以做一个完整 Demo 项目
 
 我建议你做一个项目，名字可以叫：
 
@@ -317,7 +316,6 @@ llm-infra-lab/
 │   └── benchmark_ttft.py       # 用流式输出拆分 TTFT、decode tokens/s、总延迟
 │
 ├── finetune/                   # LoRA / QLoRA 微调实验
-│   ├── dataset.jsonl           # 少量 instruction/output 样本，用来验证微调流程
 │   ├── train_lora.py           # 使用 PEFT + TRL 对 Qwen2.5-0.5B 做 LoRA 微调
 │   └── merge_lora.py           # 将 LoRA adapter 合并回 base model，便于部署或单独加载
 │

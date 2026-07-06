@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>迷你 Transformer 训练学习笔记</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #607086;
+      --line: #dbe3ef;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+      --ok: #047857;
+      --warn: #b45309;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+
+    header {
+      color: #fff;
+      background: linear-gradient(135deg, #173b70 0%, #2563eb 100%);
+      padding: 44px 24px;
+    }
+
+    header .wrap,
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 820px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 24px 56px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f7;
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0;
+      padding: 16px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5fb;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .toc a,
+    .pill {
+      display: block;
+      padding: 10px 12px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .note {
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: #f8fbff;
+      border-radius: 6px;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>迷你 Transformer 训练学习笔记</h1>
+      <p>
+        基于 Tiny Shakespeare，从零训练一个字符级 Mini GPT。目标不是得到可用大模型，
+        而是把大模型训练里最核心的链路跑通：数据、Embedding、位置编码、Self-Attention、
+        Causal Mask、Cross Entropy、反向传播、loss 下降和文本生成。
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>目录</h2>
+      <div class="toc">
+        <a href="#goal">1. 学习目标</a>
+        <a href="#pipeline">2. 训练主流程</a>
+        <a href="#concepts">3. 核心知识点</a>
+        <a href="#commands">4. 实际操作命令</a>
+        <a href="#logs">5. 训练日志解读</a>
+        <a href="#generation">6. 生成效果解读</a>
+        <a href="#gpu">7. GPU 资源观察</a>
+        <a href="#next">8. 下一步实验</a>
+      </div>
+    </section>
+
+    <section id="goal">
+      <h2>1. 学习目标</h2>
+      <p>
+        这次实验训练的是一个很小的 Transformer，参数量约 <code>0.83M</code>，
+        数据集是 Tiny Shakespeare，任务是字符级 next-token prediction。
+      </p>
+      <ul>
+        <li>理解语言模型训练本质：给定前文，预测下一个 token。</li>
+        <li>理解 Transformer 内部：Embedding、位置编码、Self-Attention、MLP、残差连接、LayerNorm。</li>
+        <li>理解 Causal Mask：训练自回归语言模型时不能偷看未来 token。</li>
+        <li>理解 Cross Entropy Loss：比较模型预测分布和真实下一个字符。</li>
+        <li>理解反向传播：<code>loss.backward()</code> 计算梯度，<code>optimizer.step()</code> 更新参数。</li>
+        <li>观察 loss 下降：从随机预测逐步学到莎士比亚文本的统计规律。</li>
+      </ul>
+      <p class="note">
+        这个实验不是为了工作中直接使用模型，而是为了能讲清楚“大模型训练到底发生了什么”。
+      </p>
+    </section>
+
+    <section id="pipeline">
+      <h2>2. 训练主流程</h2>
+      <p>训练流程可以概括为下面这条链路：</p>
+      <pre><code>文本数据
+  -> 字符表 vocab
+  -> 字符转 id
+  -> 随机采样 batch
+  -> 输入 x 和目标 y 错开一位
+  -> MiniGPT 前向传播
+  -> logits
+  -> Cross Entropy Loss
+  -> loss.backward()
+  -> optimizer.step()
+  -> loss 下降
+  -> 保存 checkpoint
+  -> 自回归生成文本</code></pre>
+
+      <h3>输入和目标如何构造</h3>
+      <p>字符级语言模型的训练样本是“前文预测后文”。例如：</p>
+      <pre><code>x = "To be or no"
+y = "o be or not"</code></pre>
+      <p>
+        <code>x</code> 和 <code>y</code> 只差一位。模型在每个位置都预测下一个字符，
+        这就是最小版本的大模型预训练任务。
+      </p>
+    </section>
+
+    <section id="concepts">
+      <h2>3. 核心知识点</h2>
+
+      <h3>Embedding</h3>
+      <p>
+        字符 id 本身只是整数，没有语义。Embedding 层把每个字符 id 映射成向量：
+        <code>token_embedding(idx)</code>。
+      </p>
+
+      <h3>Position Encoding</h3>
+      <p>
+        Self-Attention 本身不天然知道顺序，所以需要位置编码。本项目用的是可学习的位置向量：
+      </p>
+      <pre><code>x = token_embedding(idx) + position_embedding(positions)</code></pre>
+      <p>这样模型能区分“同一个字符出现在不同位置”的情况。</p>
+
+      <h3>Self-Attention</h3>
+      <p>
+        Self-Attention 会为每个 token 计算 Query、Key、Value，然后通过
+        <code>q @ k.transpose()</code> 得到 token 之间的相关性。
+      </p>
+      <pre><code>scores = q @ k.transpose(-2, -1) * (head_size ** -0.5)
+weights = softmax(scores)
+y = weights @ v</code></pre>
+      <p>
+        直观理解：当前 token 根据上下文中其他 token 的重要程度，聚合它们的信息。
+      </p>
+
+      <h3>Causal Mask</h3>
+      <p>
+        自回归语言模型只能看当前位置以及之前的 token。Causal Mask 用下三角矩阵挡住未来位置：
+      </p>
+      <pre><code>scores = scores.masked_fill(mask == 0, -inf)</code></pre>
+      <p>
+        如果没有 causal mask，模型训练时会看到答案，loss 会虚假变低，生成时却不能正常工作。
+      </p>
+
+      <h3>Cross Entropy Loss</h3>
+      <p>
+        模型输出的是每个位置对整个 vocab 的 logits，目标是真实的下一个字符 id。
+      </p>
+      <pre><code>loss = cross_entropy(
+    logits.view(batch * tokens, vocab_size),
+    targets.view(batch * tokens)
+)</code></pre>
+      <p>
+        loss 越低，说明模型给真实下一个字符分配的概率越高。
+      </p>
+
+      <h3>反向传播和参数更新</h3>
+      <p>训练真正发生在这几行：</p>
+      <pre><code>optimizer.zero_grad(set_to_none=True)
+loss.backward()
+optimizer.step()</code></pre>
+      <ul>
+        <li><code>zero_grad</code> 清空上一轮梯度。</li>
+        <li><code>backward</code> 从 loss 反向计算每个参数的梯度。</li>
+        <li><code>step</code> 用 AdamW 根据梯度更新权重。</li>
+      </ul>
+    </section>
+
+    <section id="commands">
+      <h2>4. 实际操作命令</h2>
+
+      <h3>训练</h3>
+      <pre><code>python.exe mini_gpt\train.py --steps 3000 --amp</code></pre>
+      <p>
+        <code>--amp</code> 表示使用 CUDA 自动混合精度，通常能减少显存占用并提升速度。
+      </p>
+
+      <h3>生成</h3>
+      <pre><code>python.exe mini_gpt\generate.py --checkpoint outputs\mini_gpt_shakespeare.pt --prompt "To be" --max-new-tokens 500</code></pre>
+
+      <h3>降低随机性</h3>
+      <pre><code>python.exe mini_gpt\generate.py --checkpoint outputs\mini_gpt_shakespeare.pt --prompt "KING:" --max-new-tokens 500 --temperature 0.7</code></pre>
+      <p>
+        <code>temperature</code> 越低越保守，越高越随机。迷你模型建议先试 <code>0.6</code> 到 <code>0.9</code>。
+      </p>
+    </section>
+
+    <section id="logs">
+      <h2>5. 训练日志解读</h2>
+      <p>本次训练日志：</p>
+      <pre><code>device=cuda vocab=65 params=0.83M chars=1,115,394
+step=    0 train_loss=4.3278 val_loss=4.3204
+step= 1000 train_loss=1.9734 val_loss=2.0414
+step= 2000 train_loss=1.6820 val_loss=1.8322
+step= 3000 train_loss=1.5457 val_loss=1.7224
+saved=outputs\mini_gpt_shakespeare.pt</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>含义</th>
+            <th>这次结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>device=cuda</code></td>
+            <td>训练运行在 NVIDIA GPU 上。</td>
+            <td class="ok">GPU 已使用。</td>
+          </tr>
+          <tr>
+            <td><code>vocab=65</code></td>
+            <td>Tiny Shakespeare 里共有 65 种字符。</td>
+            <td>字符级模型。</td>
+          </tr>
+          <tr>
+            <td><code>params=0.83M</code></td>
+            <td>模型参数量约 83 万。</td>
+            <td>适合 RTX 4060 学习实验。</td>
+          </tr>
+          <tr>
+            <td><code>train_loss</code></td>
+            <td>训练集 loss。</td>
+            <td class="ok">4.3278 降到 1.5457。</td>
+          </tr>
+          <tr>
+            <td><code>val_loss</code></td>
+            <td>验证集 loss。</td>
+            <td class="ok">4.3204 降到 1.7224。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="note">
+        训练集和验证集 loss 都明显下降，说明模型确实学到了文本规律，而不是代码空跑。
+      </p>
+    </section>
+
+    <section id="generation">
+      <h2>6. 生成效果解读</h2>
+      <p>训练 3000 step 后，示例输出类似：</p>
+      <pre><code>To beserved your earth of heaven
+May these of conceed up stand storn,
+...
+LADY GREY:
+She a some dead of his gainstle soom her offection,</code></pre>
+
+      <p>这个结果很有代表性：</p>
+      <ul>
+        <li class="ok">它学会了换行、标点、角色名格式，例如 <code>LADY GREY:</code>。</li>
+        <li class="ok">它能生成一些真实英文词，例如 <code>heaven</code>、<code>heart</code>、<code>lord</code>。</li>
+        <li class="warn">它也会造词，例如 <code>conceed</code>、<code>storn</code>、<code>gainstle</code>。</li>
+      </ul>
+      <p>
+        原因是它只是小型字符级模型，训练目标是预测下一个字符，不是真正理解英文语义。
+        但这已经足以证明 Transformer 训练链路跑通了。
+      </p>
+    </section>
+
+    <section id="gpu">
+      <h2>7. GPU 资源观察</h2>
+      <p>训练时可以用下面命令观察 GPU：</p>
+      <pre><code>nvidia-smi -l 10</code></pre>
+      <p>含义是每 10 秒刷新一次。也可以使用：</p>
+      <pre><code>nvidia-smi dmon -s pucm -d 10</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>怎么看</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Memory-Usage</code></td>
+            <td>显存占用。看到占用上升，说明模型和 tensor 放到了 GPU。</td>
+          </tr>
+          <tr>
+            <td><code>GPU-Util</code></td>
+            <td>GPU 计算利用率。小模型可能瞬间为 0%，因为 batch 很小、训练太快。</td>
+          </tr>
+          <tr>
+            <td><code>Power</code></td>
+            <td>功耗。训练更重时功耗会上升。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="note">
+        这次模型只有 0.83M 参数，对 RTX 4060 来说很轻，所以“用上 GPU”和“GPU 满载”不是一回事。
+      </p>
+    </section>
+
+    <section id="next">
+      <h2>8. 下一步实验</h2>
+      <h3>继续训练</h3>
+      <pre><code>python.exe mini_gpt\train.py --steps 10000 --amp</code></pre>
+
+      <h3>加大模型</h3>
+      <pre><code>python.exe mini_gpt\train.py --n-layer 6 --n-head 6 --n-embd 192 --batch-size 48 --steps 8000 --amp</code></pre>
+
+      <h3>观察过拟合</h3>
+      <p>
+        如果 <code>train_loss</code> 持续下降，但 <code>val_loss</code> 不降反升，
+        说明模型开始记忆训练集而不是泛化，这就是过拟合。
+      </p>
+
+      <h3>建议掌握的训练知识点清单</h3>
+      <ul>
+        <li>数据集切分：train / validation。</li>
+        <li>Tokenization：字符级、BPE、SentencePiece 的区别。</li>
+        <li>模型结构：Embedding、Attention、MLP、LayerNorm、Residual。</li>
+        <li>训练目标：next-token prediction。</li>
+        <li>损失函数：Cross Entropy。</li>
+        <li>优化器：SGD、Adam、AdamW。</li>
+        <li>学习率：过大会震荡，过小会收敛慢。</li>
+        <li>Batch size：影响速度、显存和梯度稳定性。</li>
+        <li>混合精度：FP16/BF16/AMP。</li>
+        <li>Checkpoint：保存模型权重、配置、词表。</li>
+        <li>评估：train loss、val loss、生成样例。</li>
+        <li>推理生成：temperature、top-k、top-p、自回归采样。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

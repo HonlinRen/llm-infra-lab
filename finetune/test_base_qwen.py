@@ -4,22 +4,25 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ask one question with Qwen2.5-0.5B-Instruct locally.")
-    parser.add_argument("--question", default="你帮我写一个500字的 AI Infra和AI 应用工程师 职业发展规划8-10年")
+    parser = argparse.ArgumentParser(description="Test the base Qwen2.5 model locally.")
+    parser.add_argument("--model", default=BASE_MODEL)
+    parser.add_argument("--question", default="保持健康的三个提示。")
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--greedy", action="store_true", help="Use deterministic greedy decoding.")
     args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        args.model,
+        dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         device_map="auto",
         trust_remote_code=True,
     )
+    model.eval()
 
     messages = [{"role": "user", "content": args.question}]
     text = tokenizer.apply_chat_template(
@@ -33,12 +36,12 @@ def main() -> None:
         outputs = model.generate(
             **inputs,
             max_new_tokens=args.max_new_tokens,
-            do_sample=False,
+            do_sample=not args.greedy,
         )
 
     answer_ids = outputs[0][inputs["input_ids"].shape[-1] :]
     answer = tokenizer.decode(answer_ids, skip_special_tokens=True)
-    print(answer)
+    print(answer.strip())
 
 
 if __name__ == "__main__":

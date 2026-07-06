@@ -5,7 +5,6 @@ __pycache__/
 
 data/
 alpaca_gpt4_data_zh/
-finetune/dataset.jsonl
 
 qwen-lora/
 qwen-lora-adapter/

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>大模型 LoRA 微调学习笔记</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <style>
     :root {
       --bg: #f7f8fb;
@@ -117,6 +118,11 @@
       background: transparent;
     }
 
+    pre code.hljs {
+      background: transparent;
+      padding: 0;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -195,7 +201,8 @@
         <li><a href="#metrics">5. 训练日志怎么看</a></li>
         <li><a href="#gpu">6. GPU 是否用起来</a></li>
         <li><a href="#infer">7. 使用微调后的模型</a></li>
-        <li><a href="#troubleshooting">8. 常见问题</a></li>
+        <li><a href="#merge">8. LoRA 合并与独立部署</a></li>
+        <li><a href="#troubleshooting">9. 常见问题</a></li>
       </ul>
     </section>
 
@@ -229,7 +236,7 @@
 
       <h3>为什么 adapter 不是完整模型</h3>
       <p>训练输出的 <code>adapter_model.safetensors</code> 只有几 MB，因为它只保存 LoRA 参数。推理时必须同时加载基座模型和 adapter：</p>
-      <pre><code>微调后模型 = Qwen/Qwen2.5-0.5B-Instruct + ./qwen-lora-adapter</code></pre>
+      <pre><code class="language-text">微调后模型 = Qwen/Qwen2.5-0.5B-Instruct + ./qwen-lora-adapter</code></pre>
 
       <h3>SFT 是什么</h3>
       <p>SFT 即 Supervised Fine-Tuning，监督微调。它使用指令和答案样本，让模型学习按照指定格式回答问题。本次数据字段是 <code>instruction</code>、<code>input</code>、<code>output</code>。</p>
@@ -238,7 +245,7 @@
     <section id="data">
       <h2>3. 数据准备</h2>
       <p>本次使用 Hugging Face 数据集 <code>llm-wizard/alpaca-gpt4-data-zh</code>，只取前 500 条做快速实验。</p>
-      <pre><code>from datasets import load_dataset
+      <pre><code class="language-python">from datasets import load_dataset
 
 dataset = load_dataset("llm-wizard/alpaca-gpt4-data-zh")
 
@@ -246,7 +253,7 @@ small = dataset["train"].select(range(500))
 small.save_to_disk("./data/alpaca_500")</code></pre>
 
       <p>保存后的数据可以通过 <code>load_from_disk</code> 读取：</p>
-      <pre><code>from datasets import load_from_disk
+      <pre><code class="language-python">from datasets import load_from_disk
 
 dataset = load_from_disk("./data/alpaca_500")
 print(dataset)
@@ -258,7 +265,7 @@ print(dataset.column_names)</code></pre>
 
       <h3>Prompt 格式</h3>
       <p>训练时需要把结构化字段拼成模型可以学习的文本格式：</p>
-      <pre><code>def format_prompt(example):
+      <pre><code class="language-python">def format_prompt(example):
     instruction = example["instruction"]
     input_text = example.get("input", "")
     output = example["output"]
@@ -275,7 +282,7 @@ print(dataset.column_names)</code></pre>
 
     <section id="train">
       <h2>4. LoRA 微调流程</h2>
-      <p>核心训练脚本位于 <code>serving/qwen_llm.py</code>。主要步骤如下：</p>
+      <p>核心训练脚本位于 <code>finetune/train_lora.py</code>。主要步骤如下：</p>
       <ol>
         <li>加载 tokenizer。</li>
         <li>加载 Qwen2.5-0.5B-Instruct 基座模型。</li>
@@ -287,7 +294,7 @@ print(dataset.column_names)</code></pre>
       </ol>
 
       <h3>运行训练</h3>
-      <pre><code>python .\serving\qwen_llm.py</code></pre>
+      <pre><code class="language-powershell">python .\finetune\train_lora.py</code></pre>
 
       <h3>关键训练配置</h3>
       <table>
@@ -331,7 +338,7 @@ print(dataset.column_names)</code></pre>
     <section id="metrics">
       <h2>5. 训练日志怎么看</h2>
       <p>训练过程中会看到类似日志：</p>
-      <pre><code>{'loss': '1.852', 'grad_norm': '0.8231', 'learning_rate': '0.0001587',
+      <pre><code class="language-python">{'loss': '1.852', 'grad_norm': '0.8231', 'learning_rate': '0.0001587',
  'entropy': '1.955', 'num_tokens': '4.461e+04',
  'mean_token_accuracy': '0.5686', 'epoch': '0.64'}</code></pre>
 
@@ -383,7 +390,7 @@ print(dataset.column_names)</code></pre>
       </table>
 
       <h3>本次训练结果</h3>
-      <pre><code>{'train_runtime': '202.3',
+      <pre><code class="language-python">{'train_runtime': '202.3',
  'train_samples_per_second': '7.413',
  'train_steps_per_second': '0.934',
  'train_loss': '1.852',
@@ -397,20 +404,20 @@ print(dataset.column_names)</code></pre>
     <section id="gpu">
       <h2>6. GPU 是否用起来</h2>
       <p>一开始训练日志出现过：</p>
-      <pre><code>UserWarning: 'pin_memory' argument is set as true but no accelerator is found</code></pre>
+      <pre><code class="language-text">UserWarning: 'pin_memory' argument is set as true but no accelerator is found</code></pre>
       <p>这表示 PyTorch 没识别到 CUDA。排查后发现安装的是 CPU 版 PyTorch：</p>
-      <pre><code>torch 2.12.1+cpu
+      <pre><code class="language-text">torch 2.12.1+cpu
 cuda available False
 torch cuda build None
 device count 0</code></pre>
 
       <h3>修复方式</h3>
       <p>卸载 CPU 版 PyTorch，安装 CUDA 版 PyTorch：</p>
-      <pre><code>.\.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio
+      <pre><code class="language-powershell">.\.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio
 .\.venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126</code></pre>
 
       <p>验证 CUDA：</p>
-      <pre><code>.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.version.cuda); print(torch.cuda.get_device_name(0))"</code></pre>
+      <pre><code class="language-powershell">.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.version.cuda); print(torch.cuda.get_device_name(0))"</code></pre>
 
       <h3>nvidia-smi 怎么看</h3>
       <p>训练真正用上 GPU 时，<code>nvidia-smi</code> 里会看到：</p>
@@ -429,7 +436,7 @@ device count 0</code></pre>
     <section id="infer">
       <h2>7. 使用微调后的模型</h2>
       <p>训练结束后，adapter 位于：</p>
-      <pre><code>./qwen-lora-adapter</code></pre>
+      <pre><code class="language-text">./qwen-lora-adapter</code></pre>
       <p>目录中关键文件包括：</p>
       <ul>
         <li><code>adapter_config.json</code>：LoRA 配置。</li>
@@ -438,7 +445,7 @@ device count 0</code></pre>
       </ul>
 
       <h3>加载 adapter 推理</h3>
-      <pre><code>import torch
+      <pre><code class="language-python">import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 
@@ -483,12 +490,12 @@ print(answer)</code></pre>
 
       <h3>如何确认不是原始 Qwen</h3>
       <p>推理脚本中加入：</p>
-      <pre><code>print(type(model))
+      <pre><code class="language-python">print(type(model))
 print(model.peft_config)
 print("active adapters:", model.active_adapters())</code></pre>
 
       <p>如果看到下面信息，就说明已经加载 LoRA：</p>
-      <pre><code>&lt;class 'peft.peft_model.PeftModelForCausalLM'&gt;
+      <pre><code class="language-text">&lt;class 'peft.peft_model.PeftModelForCausalLM'&gt;
 peft_type=&lt;PeftType.LORA: 'LORA'&gt;
 base_model_name_or_path='Qwen/Qwen2.5-0.5B-Instruct'
 target_modules={'q_proj', 'k_proj', 'v_proj', 'o_proj'}</code></pre>
@@ -498,8 +505,148 @@ target_modules={'q_proj', 'k_proj', 'v_proj', 'o_proj'}</code></pre>
       </div>
     </section>
 
+    <section id="merge">
+      <h2>8. LoRA 合并与独立部署</h2>
+
+      <h3>为什么要合并 LoRA</h3>
+      <p>LoRA 训练完成后默认得到的是 adapter，它只保存增量权重。使用 adapter 推理时，需要先加载基座模型，再加载 LoRA：</p>
+      <pre><code class="language-text">Qwen/Qwen2.5-0.5B-Instruct + ./qwen-lora-adapter</code></pre>
+
+      <p>合并 LoRA 的目的，是把 adapter 权重写回基座模型权重，生成一个完整模型目录。合并后部署时不再依赖 <code>peft.PeftModel</code>，可以直接用 Transformers 加载：</p>
+      <pre><code class="language-text">./qwen-lora-merged</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>方式</th>
+            <th>加载方式</th>
+            <th>适合场景</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Adapter 推理</td>
+            <td>基座模型 + <code>PeftModel.from_pretrained(adapter)</code></td>
+            <td>实验、多个 adapter 切换、节省存储空间。</td>
+          </tr>
+          <tr>
+            <td>Merged 模型推理</td>
+            <td><code>AutoModelForCausalLM.from_pretrained("./qwen-lora-merged")</code></td>
+            <td>独立部署、分享完整模型、减少推理加载链路。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>合并脚本</h3>
+      <p>本项目使用 <code>finetune/merge_lora.py</code> 完成合并。核心步骤是加载基座模型、加载 adapter，然后调用 <code>merge_and_unload()</code>：</p>
+      <pre><code class="language-python">model = AutoModelForCausalLM.from_pretrained(
+    args.base_model,
+    dtype=parse_dtype(args.dtype),
+    device_map=args.device_map,
+    trust_remote_code=True,
+)
+
+model = PeftModel.from_pretrained(model, str(adapter_path))
+merged = model.merge_and_unload()
+
+merged.save_pretrained(str(output_dir), safe_serialization=True)
+tokenizer.save_pretrained(str(output_dir))</code></pre>
+
+      <p>默认参数已经和本次实践保持一致：</p>
+      <ul>
+        <li>基座模型：<code>Qwen/Qwen2.5-0.5B-Instruct</code></li>
+        <li>LoRA adapter：<code>./qwen-lora-adapter</code></li>
+        <li>合并输出：<code>./qwen-lora-merged</code></li>
+      </ul>
+
+      <h3>执行合并</h3>
+      <pre><code class="language-powershell">python .\finetune\merge_lora.py</code></pre>
+
+      <p>成功时会看到类似输出：</p>
+      <pre><code class="language-text">Loading base model: Qwen/Qwen2.5-0.5B-Instruct
+Loading LoRA adapter: qwen-lora-adapter
+Merging LoRA weights into the base model...
+Writing model shards: 100%
+Merged model saved to: qwen-lora-merged
+You can now load it directly with AutoModelForCausalLM.from_pretrained().</code></pre>
+
+      <h3>合并后目录</h3>
+      <p>合并后的完整模型目录中会包含完整权重和配置：</p>
+      <pre><code class="language-text">qwen-lora-merged/
+  config.json
+  generation_config.json
+  model.safetensors
+  tokenizer.json
+  tokenizer_config.json
+  chat_template.jinja</code></pre>
+
+      <div class="callout">
+        合并后的 <code>model.safetensors</code> 会明显大于 LoRA adapter。adapter 只有几 MB，而 merged 模型接近基座模型完整大小，这是正常现象。
+      </div>
+
+      <h3>测试合并后模型</h3>
+      <p>合并后的模型可以直接用 <code>finetune/test_merged_lora.py</code> 测试：</p>
+      <pre><code class="language-powershell">python .\finetune\test_merged_lora.py --question "保持健康的三个提示。" --greedy</code></pre>
+
+      <p>核心加载方式不再需要 <code>PeftModel</code>：</p>
+      <pre><code class="language-python">from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+model_path = "./qwen-lora-merged"
+
+tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    model_path,
+    dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    device_map="auto",
+    trust_remote_code=True,
+)
+model.eval()</code></pre>
+
+      <p>本次合并后测试输出正常，例如：</p>
+      <pre><code class="language-text">1. 坚持锻炼：定期进行体育活动，如跑步、游泳或骑自行车等，可以增强体质，提高免疫力。
+2. 保证充足睡眠：成年人每天需要7-8小时的睡眠时间，充足的睡眠有助于身体恢复和精神健康。
+3. 饮食均衡：多吃蔬菜水果，少吃油腻食物，保持饮食平衡，有利于身体健康。</code></pre>
+
+      <h3>三个测试脚本的用途</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>脚本</th>
+            <th>测试对象</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>finetune/test_base_qwen.py</code></td>
+            <td>原始 Qwen 基座模型</td>
+            <td>作为 baseline，对比微调前后的回答差异。</td>
+          </tr>
+          <tr>
+            <td><code>finetune/test_lora_adapter.py</code></td>
+            <td>基座模型 + LoRA adapter</td>
+            <td>验证未合并的 LoRA adapter 是否生效。</td>
+          </tr>
+          <tr>
+            <td><code>finetune/test_merged_lora.py</code></td>
+            <td>合并后的完整模型</td>
+            <td>验证 merged 模型能否独立加载和推理。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>注意事项</h3>
+      <ul>
+        <li>合并时的基座模型必须和训练 adapter 时使用的基座模型一致。</li>
+        <li>合并输出目录体积较大，通常不要直接提交到普通 Git 仓库。</li>
+        <li>如果要发布完整模型，建议使用 Hugging Face Hub 或 Git LFS，并确认模型与数据集许可证允许发布。</li>
+        <li>合并后如果还想继续训练 LoRA，一般重新从基座模型和 adapter 训练链路开始更清晰。</li>
+      </ul>
+    </section>
+
     <section id="troubleshooting">
-      <h2>8. 常见问题</h2>
+      <h2>9. 常见问题</h2>
 
       <table>
         <thead>
@@ -548,10 +695,16 @@ target_modules={'q_proj', 'k_proj', 'v_proj', 'o_proj'}</code></pre>
         <li>尝试对比原始 Qwen 和 LoRA 模型在同一问题上的输出差异。</li>
         <li>把 <code>do_sample=False</code> 用于确定性对比，减少随机采样影响。</li>
         <li>尝试调整 <code>batch_size</code>、<code>learning_rate</code>、<code>epochs</code>，观察 loss 和输出变化。</li>
-        <li>学习 LoRA 合并，把 adapter merge 到完整模型中，便于独立部署。</li>
+        <li>尝试把 merged 模型接入本地服务接口，例如 FastAPI、OpenAI-compatible API 或 vLLM。</li>
         <li>准备更贴近真实业务的数据集，而不是只用通用问答样本。</li>
       </ul>
     </section>
   </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/powershell.min.js"></script>
+  <script>
+    hljs.highlightAll();
+  </script>
 </body>
 </html>
