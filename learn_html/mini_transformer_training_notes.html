@@ -357,7 +357,7 @@ y = "o be or not"</code></pre>
         它没有 encoder，也没有双向注意力；它专门为自回归生成而设计。
       </p>
       <div class="diagram" aria-label="MiniGPT 模型结构 SVG 图">
-        <svg viewBox="0 0 940 520" role="img">
+        <svg viewBox="0 0 940 590" role="img">
           <defs>
             <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
               <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"></path>
@@ -411,17 +411,18 @@ y = "o be or not"</code></pre>
           <rect class="green" x="788" y="388" width="120" height="50"></rect>
           <text class="txt" x="815" y="418">Linear Head</text>
 
-          <line class="arr" x1="848" y1="438" x2="848" y2="462"></line>
-          <rect class="layer" x="780" y="466" width="136" height="48"></rect>
-          <text class="txt" x="823" y="493">logits</text>
-          <text class="small" x="802" y="509">每个位置预测 vocab</text>
+          <line class="arr" x1="848" y1="438" x2="848" y2="458"></line>
+          <rect class="layer" x="780" y="462" width="136" height="48"></rect>
+          <text class="txt" x="823" y="489">logits</text>
+          <text class="small" x="802" y="505">每个位置预测 vocab</text>
 
-          <rect class="layer" x="70" y="396" width="248" height="64"></rect>
-          <text class="txt" x="104" y="422">生成时自回归</text>
-          <text class="small" x="96" y="442">仅推理：取最后位置采样 next id</text>
-          <path class="infer" d="M780 490 H330 V428 H321"></path>
-          <path class="infer" d="M194 396 V350 H54 V57 H67"></path>
-          <text class="small" x="334" y="482">推理循环：logits -> sample next id -> append -> 再输入</text>
+          <line class="infer" x1="848" y1="510" x2="848" y2="535"></line>
+          <rect class="layer" x="742" y="540" width="212" height="44"></rect>
+          <text class="txt" x="774" y="566">Sampling / Next Token</text>
+          <text class="small" x="774" y="580">取最后位置采样 next id</text>
+
+          <path class="infer" d="M742 562 H128 V88"></path>
+          <text class="small" x="236" y="556">仅推理回路：logits -> sampling -> append -> token ids</text>
         </svg>
       </div>
 
