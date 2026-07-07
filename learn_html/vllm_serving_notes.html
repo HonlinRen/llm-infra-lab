@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vLLM Serving 实验笔记</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #607086;
+      --line: #dbe3ef;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+      --ok: #047857;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+
+    header {
+      color: #fff;
+      background: linear-gradient(135deg, #173b70 0%, #2563eb 100%);
+      padding: 44px 24px;
+    }
+
+    header .wrap,
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 900px;
+      margin: 0;
+      color: #dbeafe;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 24px 56px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: #eef2f7;
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.95em;
+    }
+
+    header code {
+      color: #123b82;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      font-weight: 700;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0;
+      padding: 16px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+      border-radius: 0;
+    }
+
+    table {
+      width: 100%;
+      margin: 14px 0;
+      border-collapse: collapse;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5fb;
+      font-weight: 700;
+    }
+
+    .note {
+      margin: 14px 0;
+      padding: 14px 16px;
+      background: var(--accent-soft);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .bad {
+      color: var(--bad);
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .problem {
+      padding: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .problem strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
+    figure {
+      margin: 18px 0;
+      padding: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    figcaption {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    svg.diagram {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #ffffff;
+      border: 1px solid #e5edf7;
+      border-radius: 8px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .swatch {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 6px;
+      border-radius: 3px;
+      vertical-align: -1px;
+    }
+
+    .metric {
+      padding: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      color: var(--accent);
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 800px) {
+      .grid,
+      .problem-grid {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        padding: 32px 18px;
+      }
+
+      main {
+        padding: 20px 16px 44px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>vLLM Serving 实验笔记</h1>
+      <p>用 <code>Qwen2.5-1.5B-Instruct</code> 在 WSL2 + RTX 4060 8GB 环境下完成 OpenAI-compatible API 服务、并发 benchmark、Continuous Batching 和 KV Cache 观察。</p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>实验目标</h2>
+      <p>本实验不是为了证明单请求一定比 Transformers 快，而是为了验证 vLLM 在服务化推理里的核心价值：</p>
+      <ul>
+        <li><strong>OpenAI-compatible API</strong>：让本地模型以标准 HTTP 接口对外提供服务。</li>
+        <li><strong>Continuous Batching</strong>：多个请求同时到达时动态合批，提高 GPU 利用率。</li>
+        <li><strong>PagedAttention / KV Cache 管理</strong>：把多请求的 KV cache 组织成更容易复用和调度的块。</li>
+        <li><strong>Throughput Benchmark</strong>：观察并发上升时 req/s 和 tokens/s 如何变化。</li>
+      </ul>
+      <div class="note">
+        这类实验的重点是理解“模型推理如何变成服务”，也就是从单次 <code>generate()</code> 走向多用户并发请求调度。
+      </div>
+    </section>
+
+    <section>
+      <h2>运行环境</h2>
+      <table>
+        <tr>
+          <th>项目</th>
+          <th>配置</th>
+        </tr>
+        <tr>
+          <td>系统</td>
+          <td>WSL2 Ubuntu，原生 Windows PowerShell 不适合运行 vLLM。</td>
+        </tr>
+        <tr>
+          <td>Python</td>
+          <td><code>Python 3.12.13</code>，避免使用过新的 Python 3.14。</td>
+        </tr>
+        <tr>
+          <td>GPU</td>
+          <td>NVIDIA GeForce RTX 4060 8GB。</td>
+        </tr>
+        <tr>
+          <td>驱动</td>
+          <td>Windows NVIDIA Driver 610.62，CUDA UMD 13.3。</td>
+        </tr>
+        <tr>
+          <td>模型</td>
+          <td><code>Qwen/Qwen2.5-1.5B-Instruct</code>。</td>
+        </tr>
+      </table>
+
+      <h3>环境验证</h3>
+      <pre><code>nvidia-smi
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"</code></pre>
+
+      <p>期望看到：</p>
+      <pre><code>True
+NVIDIA GeForce RTX 4060</code></pre>
+    </section>
+
+    <section>
+      <h2>推荐执行命令</h2>
+      <p>服务端、客户端和 benchmark 都在 WSL 的 <code>.venv-wsl</code> 环境里运行。</p>
+
+      <h3>启动 vLLM Server</h3>
+      <pre><code>cd /mnt/c/Users/OnlyRen/Project/LLM/llm-infra-lab
+source .venv-wsl/bin/activate
+python serving/vllm_server.py \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --gpu-memory-utilization 0.8 \
+  --max-model-len 4096 \
+  --hf-endpoint https://hf-mirror.com \
+  --enforce-eager</code></pre>
+
+      <h3>验证 OpenAI API</h3>
+      <pre><code>python serving/client.py \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --stream</code></pre>
+
+      <h3>并发 Benchmark</h3>
+      <pre><code>python serving/benchmark.py \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --concurrency 1,4,8 \
+  --requests-per-level 8 \
+  --stream</code></pre>
+    </section>
+
+    <section>
+      <h2>vLLM 要解决什么问题</h2>
+      <p>从单机脚本到在线服务，问题不再只是“模型能不能生成”，而是“多个用户同时请求时，GPU 能不能一直高效工作”。vLLM 的核心优化可以用三个问题串起来。</p>
+
+      <div class="problem-grid">
+        <div class="problem">
+          <strong>问题 1：普通 generate 为什么并发吞吐低？</strong>
+          <p>每个请求长度不同，prefill 和 decode 交替发生。如果一个请求一个请求处理，GPU 会频繁等待，batch 很小，吞吐上不去。</p>
+        </div>
+        <div class="problem">
+          <strong>问题 2：静态 batch 为什么不够？</strong>
+          <p>静态 batch 要等一组请求一起开始、一起结束。短请求完成后仍被长请求拖住，无法及时插入新请求。</p>
+        </div>
+        <div class="problem">
+          <strong>问题 3：KV Cache 为什么难管理？</strong>
+          <p>每个请求生成长度不同，KV cache 会不断增长。如果按连续大块分配，显存容易碎片化，多个请求之间也不好复用空闲空间。</p>
+        </div>
+        <div class="problem">
+          <strong>问题 4：vLLM 的核心回答是什么？</strong>
+          <p>用 continuous batching 动态调度请求，用 PagedAttention 把 KV cache 拆成固定大小 block，再通过 block table 管理每个请求的上下文。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>图解：普通推理 vs Continuous Batching</h2>
+      <p>普通推理更像串行处理：请求 A 做完才轮到 B，GPU 中间会出现空洞。vLLM 则在 decode 阶段不断把新请求插进当前 batch，让 GPU 更接近持续工作状态。</p>
+
+      <figure>
+        <svg class="diagram" viewBox="0 0 980 380" role="img" aria-label="普通推理和 continuous batching 对比图">
+          <defs>
+            <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+
+          <text x="36" y="42" font-size="22" font-weight="700" fill="#172033">普通串行推理</text>
+          <text x="520" y="42" font-size="22" font-weight="700" fill="#172033">vLLM Continuous Batching</text>
+
+          <line x1="36" y1="80" x2="454" y2="80" stroke="#94a3b8" stroke-width="2"></line>
+          <line x1="520" y1="80" x2="938" y2="80" stroke="#94a3b8" stroke-width="2"></line>
+          <text x="36" y="70" font-size="13" fill="#607086">time</text>
+          <text x="520" y="70" font-size="13" fill="#607086">time</text>
+
+          <rect x="36" y="105" width="120" height="42" rx="6" fill="#bfdbfe" stroke="#2563eb"></rect>
+          <text x="62" y="132" font-size="14" fill="#172033">Request A</text>
+          <rect x="176" y="105" width="120" height="42" rx="6" fill="#fde68a" stroke="#b45309"></rect>
+          <text x="202" y="132" font-size="14" fill="#172033">Request B</text>
+          <rect x="316" y="105" width="120" height="42" rx="6" fill="#bbf7d0" stroke="#047857"></rect>
+          <text x="342" y="132" font-size="14" fill="#172033">Request C</text>
+
+          <rect x="36" y="170" width="120" height="34" rx="5" fill="#2563eb"></rect>
+          <rect x="156" y="170" width="20" height="34" rx="3" fill="#e5e7eb"></rect>
+          <rect x="176" y="170" width="120" height="34" rx="5" fill="#b45309"></rect>
+          <rect x="296" y="170" width="20" height="34" rx="3" fill="#e5e7eb"></rect>
+          <rect x="316" y="170" width="120" height="34" rx="5" fill="#047857"></rect>
+          <text x="52" y="192" font-size="13" fill="#fff">GPU busy</text>
+          <text x="185" y="192" font-size="13" fill="#fff">GPU busy</text>
+          <text x="325" y="192" font-size="13" fill="#fff">GPU busy</text>
+          <text x="75" y="242" font-size="14" fill="#607086">请求之间有等待</text>
+          <path d="M150 216 C175 245, 205 245, 230 216" fill="none" stroke="#b91c1c" stroke-width="2"></path>
+          <text x="166" y="265" font-size="14" fill="#b91c1c">GPU 空洞</text>
+
+          <rect x="520" y="105" width="118" height="42" rx="6" fill="#bfdbfe" stroke="#2563eb"></rect>
+          <text x="546" y="132" font-size="14" fill="#172033">Request A</text>
+          <rect x="585" y="155" width="150" height="42" rx="6" fill="#fde68a" stroke="#b45309"></rect>
+          <text x="626" y="182" font-size="14" fill="#172033">Request B</text>
+          <rect x="680" y="205" width="168" height="42" rx="6" fill="#bbf7d0" stroke="#047857"></rect>
+          <text x="734" y="232" font-size="14" fill="#172033">Request C</text>
+          <rect x="520" y="275" width="330" height="34" rx="5" fill="#2563eb"></rect>
+          <rect x="585" y="275" width="265" height="34" rx="5" fill="#b45309" opacity="0.78"></rect>
+          <rect x="680" y="275" width="170" height="34" rx="5" fill="#047857" opacity="0.78"></rect>
+          <text x="608" y="297" font-size="13" fill="#fff">动态 batch：新请求持续加入 decode</text>
+          <path d="M638 126 L680 126 L680 267" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"></path>
+          <path d="M735 176 L775 176 L775 267" fill="none" stroke="#b45309" stroke-width="2" marker-end="url(#arrow-blue)"></path>
+          <text x="520" y="338" font-size="14" fill="#607086">目标：减少 GPU 空闲，提高整体 tokens/s 和 req/s</text>
+        </svg>
+        <figcaption>Continuous batching 的关键不是等一个固定 batch 全部结束，而是在每个调度步动态加入可执行请求。</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>图解：PagedAttention 与 KV Cache</h2>
+      <p>Transformer decode 时，每生成一个 token 都要保存该 token 的 Key/Value。请求越多、上下文越长，KV cache 占用越大。PagedAttention 借鉴虚拟内存分页思想，把 KV cache 拆成固定大小 block，用 block table 记录每个请求的逻辑 token 对应哪些物理 block。</p>
+
+      <figure>
+        <svg class="diagram" viewBox="0 0 980 430" role="img" aria-label="PagedAttention 管理 KV cache 的示意图">
+          <text x="36" y="42" font-size="22" font-weight="700" fill="#172033">传统连续 KV Cache</text>
+          <text x="530" y="42" font-size="22" font-weight="700" fill="#172033">PagedAttention Block 管理</text>
+
+          <rect x="36" y="78" width="398" height="64" rx="8" fill="#eef2ff" stroke="#2563eb"></rect>
+          <rect x="52" y="94" width="110" height="32" rx="5" fill="#bfdbfe" stroke="#2563eb"></rect>
+          <rect x="172" y="94" width="75" height="32" rx="5" fill="#fde68a" stroke="#b45309"></rect>
+          <rect x="257" y="94" width="140" height="32" rx="5" fill="#bbf7d0" stroke="#047857"></rect>
+          <text x="80" y="115" font-size="13" fill="#172033">Req A</text>
+          <text x="192" y="115" font-size="13" fill="#172033">Req B</text>
+          <text x="300" y="115" font-size="13" fill="#172033">Req C</text>
+
+          <rect x="36" y="170" width="398" height="64" rx="8" fill="#fff7ed" stroke="#fed7aa"></rect>
+          <rect x="52" y="186" width="120" height="32" rx="5" fill="#bfdbfe" stroke="#2563eb"></rect>
+          <rect x="205" y="186" width="35" height="32" rx="5" fill="#e5e7eb" stroke="#cbd5e1"></rect>
+          <rect x="260" y="186" width="125" height="32" rx="5" fill="#bbf7d0" stroke="#047857"></rect>
+          <text x="76" y="207" font-size="13" fill="#172033">Req A</text>
+          <text x="209" y="207" font-size="12" fill="#607086">碎片</text>
+          <text x="292" y="207" font-size="13" fill="#172033">Req C</text>
+          <text x="58" y="260" font-size="14" fill="#b91c1c">请求长度变化后，连续空间容易碎片化</text>
+
+          <rect x="530" y="78" width="390" height="226" rx="8" fill="#f8fafc" stroke="#dbe3ef"></rect>
+          <text x="550" y="108" font-size="15" font-weight="700" fill="#172033">物理 KV blocks</text>
+          <g>
+            <rect x="550" y="126" width="52" height="42" rx="5" fill="#bfdbfe" stroke="#2563eb"></rect>
+            <rect x="612" y="126" width="52" height="42" rx="5" fill="#bbf7d0" stroke="#047857"></rect>
+            <rect x="674" y="126" width="52" height="42" rx="5" fill="#fde68a" stroke="#b45309"></rect>
+            <rect x="736" y="126" width="52" height="42" rx="5" fill="#bfdbfe" stroke="#2563eb"></rect>
+            <rect x="798" y="126" width="52" height="42" rx="5" fill="#bbf7d0" stroke="#047857"></rect>
+            <rect x="860" y="126" width="40" height="42" rx="5" fill="#e5e7eb" stroke="#cbd5e1"></rect>
+            <text x="566" y="152" font-size="12" fill="#172033">B1</text>
+            <text x="628" y="152" font-size="12" fill="#172033">B2</text>
+            <text x="690" y="152" font-size="12" fill="#172033">B3</text>
+            <text x="752" y="152" font-size="12" fill="#172033">B4</text>
+            <text x="814" y="152" font-size="12" fill="#172033">B5</text>
+          </g>
+
+          <text x="550" y="208" font-size="15" font-weight="700" fill="#172033">Block Table</text>
+          <rect x="550" y="224" width="330" height="30" rx="4" fill="#ffffff" stroke="#dbe3ef"></rect>
+          <rect x="550" y="254" width="330" height="30" rx="4" fill="#ffffff" stroke="#dbe3ef"></rect>
+          <rect x="550" y="284" width="330" height="30" rx="4" fill="#ffffff" stroke="#dbe3ef"></rect>
+          <text x="564" y="244" font-size="13" fill="#172033">Req A: logical tokens → B1, B4</text>
+          <text x="564" y="274" font-size="13" fill="#172033">Req B: logical tokens → B3</text>
+          <text x="564" y="304" font-size="13" fill="#172033">Req C: logical tokens → B2, B5</text>
+
+          <path d="M604 224 C625 200, 585 183, 576 168" fill="none" stroke="#2563eb" stroke-width="2"></path>
+          <path d="M758 224 C775 200, 770 183, 762 168" fill="none" stroke="#2563eb" stroke-width="2"></path>
+          <path d="M604 284 C620 260, 638 190, 638 168" fill="none" stroke="#047857" stroke-width="2"></path>
+          <path d="M758 284 C805 250, 826 190, 824 168" fill="none" stroke="#047857" stroke-width="2"></path>
+
+          <text x="530" y="348" font-size="14" fill="#607086">优势：非连续物理 block 也能组成一个请求的逻辑上下文</text>
+          <text x="530" y="374" font-size="14" fill="#607086">效果：减少显存碎片，支持更多并发请求共享 KV cache 池</text>
+        </svg>
+        <figcaption>KV cache 不再要求每个请求占用一整段连续显存，而是通过 block table 进行间接映射。</figcaption>
+      </figure>
+
+      <div class="legend">
+        <span><span class="swatch" style="background:#bfdbfe"></span>Request A</span>
+        <span><span class="swatch" style="background:#fde68a"></span>Request B</span>
+        <span><span class="swatch" style="background:#bbf7d0"></span>Request C</span>
+        <span><span class="swatch" style="background:#e5e7eb"></span>空闲或碎片</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>图解：一次请求在 vLLM 中怎么走</h2>
+      <p>当客户端调用 <code>/v1/chat/completions</code> 时，请求会经过 API Server、Scheduler、Engine、GPU Worker。Prefill 负责处理 prompt，Decode 逐 token 生成，KV cache 在两阶段之间保存上下文状态。</p>
+
+      <figure>
+        <svg class="diagram" viewBox="0 0 980 340" role="img" aria-label="vLLM 请求处理链路图">
+          <defs>
+            <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#047857"></path>
+            </marker>
+          </defs>
+
+          <rect x="42" y="82" width="130" height="70" rx="8" fill="#eef2ff" stroke="#2563eb"></rect>
+          <text x="76" y="112" font-size="15" font-weight="700" fill="#172033">Client</text>
+          <text x="58" y="136" font-size="12" fill="#607086">OpenAI SDK</text>
+
+          <rect x="230" y="82" width="150" height="70" rx="8" fill="#eff6ff" stroke="#2563eb"></rect>
+          <text x="262" y="112" font-size="15" font-weight="700" fill="#172033">API Server</text>
+          <text x="250" y="136" font-size="12" fill="#607086">/v1/chat/completions</text>
+
+          <rect x="438" y="82" width="150" height="70" rx="8" fill="#fef3c7" stroke="#b45309"></rect>
+          <text x="474" y="112" font-size="15" font-weight="700" fill="#172033">Scheduler</text>
+          <text x="460" y="136" font-size="12" fill="#607086">continuous batching</text>
+
+          <rect x="646" y="52" width="150" height="70" rx="8" fill="#dcfce7" stroke="#047857"></rect>
+          <text x="692" y="82" font-size="15" font-weight="700" fill="#172033">Prefill</text>
+          <text x="670" y="106" font-size="12" fill="#607086">处理 prompt</text>
+
+          <rect x="646" y="172" width="150" height="70" rx="8" fill="#dcfce7" stroke="#047857"></rect>
+          <text x="692" y="202" font-size="15" font-weight="700" fill="#172033">Decode</text>
+          <text x="668" y="226" font-size="12" fill="#607086">逐 token 生成</text>
+
+          <rect x="840" y="112" width="110" height="70" rx="8" fill="#f8fafc" stroke="#64748b"></rect>
+          <text x="868" y="142" font-size="15" font-weight="700" fill="#172033">GPU</text>
+          <text x="858" y="166" font-size="12" fill="#607086">KV blocks</text>
+
+          <line x1="172" y1="117" x2="230" y2="117" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></line>
+          <line x1="380" y1="117" x2="438" y2="117" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></line>
+          <line x1="588" y1="117" x2="646" y2="88" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></line>
+          <line x1="588" y1="117" x2="646" y2="206" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></line>
+          <line x1="796" y1="88" x2="840" y2="132" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></line>
+          <line x1="796" y1="206" x2="840" y2="162" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></line>
+
+          <path d="M720 242 C700 290, 520 292, 512 154" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 6"></path>
+          <text x="458" y="292" font-size="13" fill="#b45309">decode 每一步都会回到调度器，插入新请求或释放完成请求</text>
+
+          <text x="42" y="284" font-size="14" fill="#607086">本实验中，client.py 验证 API 链路；benchmark.py 用并发请求验证调度和吞吐。</text>
+        </svg>
+        <figcaption>vLLM 的服务化价值体现在调度层和 KV cache 层，而不是只把模型包一层 HTTP。</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>启动参数说明</h2>
+      <table>
+        <tr>
+          <th>参数或环境变量</th>
+          <th>作用</th>
+        </tr>
+        <tr>
+          <td><code>--gpu-memory-utilization 0.8</code></td>
+          <td>让 vLLM 以约 80% GPU 显存为目标规划权重、KV cache 和运行时内存。</td>
+        </tr>
+        <tr>
+          <td><code>--max-model-len 4096</code></td>
+          <td>限制最大上下文长度，降低 KV cache 预留压力，更适合 8GB 显存。</td>
+        </tr>
+        <tr>
+          <td><code>--hf-endpoint https://hf-mirror.com</code></td>
+          <td>在 Hugging Face 主站不可达时使用镜像下载模型配置和权重。</td>
+        </tr>
+        <tr>
+          <td><code>HF_HUB_DISABLE_XET=1</code></td>
+          <td>禁用 Xet/CAS 下载路径，避免 401 Unauthorized，改走普通权重下载。</td>
+        </tr>
+        <tr>
+          <td><code>--enforce-eager</code></td>
+          <td>关闭 Torch compile 和 CUDA graph，牺牲部分性能换取 WSL 环境稳定性。</td>
+        </tr>
+        <tr>
+          <td><code>VLLM_USE_FLASHINFER_SAMPLER=0</code></td>
+          <td>禁用 FlashInfer sampler，避免 WSL 下 JIT 编译 CUDA kernel 时的 toolkit header 版本冲突。</td>
+        </tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>排错复盘</h2>
+      <table>
+        <tr>
+          <th>现象</th>
+          <th>原因</th>
+          <th>解决</th>
+        </tr>
+        <tr>
+          <td><code>vllm._C_stable_libtorch</code> 找不到</td>
+          <td>在原生 Windows 环境运行 vLLM。</td>
+          <td>改用 WSL2 Ubuntu / Linux 环境。</td>
+        </tr>
+        <tr>
+          <td><code>Segmentation fault</code></td>
+          <td>Python 3.14 太新，PyTorch/vLLM/CUDA 扩展不稳定。</td>
+          <td>使用 <code>uv venv --python 3.12</code> 创建 Python 3.12 环境。</td>
+        </tr>
+        <tr>
+          <td><code>GPU access blocked</code> 或 <code>cuda_available False</code></td>
+          <td>WSL 没拿到 GPU，或驱动/WSL 状态不一致。</td>
+          <td>升级 NVIDIA 驱动到 CUDA 13.x 支持版本，执行 <code>wsl --shutdown</code> 并重启。</td>
+        </tr>
+        <tr>
+          <td><code>Network is unreachable</code></td>
+          <td>WSL 无法访问 Hugging Face 主站。</td>
+          <td>使用 <code>HF_ENDPOINT=https://hf-mirror.com</code>。</td>
+        </tr>
+        <tr>
+          <td>Xet/CAS <code>401 Unauthorized</code></td>
+          <td>权重下载走了 Hugging Face Xet/CAS 路径。</td>
+          <td>设置 <code>HF_HUB_DISABLE_XET=1</code>。</td>
+        </tr>
+        <tr>
+          <td><code>Permission denied: nvcc</code></td>
+          <td>PyTorch Inductor 查找 CUDA 编译器路径不稳定。</td>
+          <td>把虚拟环境里的 CUDA <code>bin</code> 加入 <code>PATH</code>，并使用 <code>--enforce-eager</code>。</td>
+        </tr>
+        <tr>
+          <td>FlashInfer JIT 编译失败</td>
+          <td>FlashInfer sampler 编译时 CUDA compiler 与 headers 版本不匹配。</td>
+          <td>设置 <code>VLLM_USE_FLASHINFER_SAMPLER=0</code>，走 PyTorch/native sampler。</td>
+        </tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Benchmark 结果</h2>
+      <div class="grid">
+        <div class="metric">
+          <strong>0.43 → 5.18</strong>
+          <span>req/s，从并发 1 到并发 8</span>
+        </div>
+        <div class="metric">
+          <strong>42.7 → 518.2</strong>
+          <span>output tokens/s，从并发 1 到并发 8</span>
+        </div>
+        <div class="metric">
+          <strong>8 / 8</strong>
+          <span>每档并发请求全部成功</span>
+        </div>
+      </div>
+
+      <table>
+        <tr>
+          <th>Concurrency</th>
+          <th>Success</th>
+          <th>Avg Latency</th>
+          <th>Avg TTFT</th>
+          <th>Req/s</th>
+          <th>Output Tokens/s</th>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td>8/8</td>
+          <td>1.821s</td>
+          <td>0.460s</td>
+          <td>0.427</td>
+          <td>42.712</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>8/8</td>
+          <td>1.460s</td>
+          <td>0.039s</td>
+          <td>2.707</td>
+          <td>270.741</td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>8/8</td>
+          <td>1.495s</td>
+          <td>0.055s</td>
+          <td>5.182</td>
+          <td>518.228</td>
+        </tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>结果分析</h2>
+      <p><span class="ok">核心结论：</span>并发从 1 提升到 8 时，请求吞吐从 0.427 req/s 提升到 5.182 req/s，输出 token 吞吐从 42.712 tokens/s 提升到 518.228 tokens/s。</p>
+      <p>这说明 vLLM 在多请求场景下能通过 continuous batching 更充分地利用 GPU。单请求时 batch 太小，GPU 利用率不高；多个请求同时进入后，vLLM 可以动态合批，让 GPU 持续工作。</p>
+      <p>并发 4 和并发 8 的平均延迟分别是 1.460s 和 1.495s，单请求等待时间没有明显变差，但系统总吞吐继续提升。这是服务化推理最重要的观察点。</p>
+      <p><span class="warn">注意：</span>本实验不能简单表述为“vLLM 单请求更快”。它更适合说明“vLLM 在并发请求下吞吐更好”。</p>
+      <p><span class="warn">环境说明：</span>为了在 WSL 学习环境中稳定跑通，使用了 <code>--enforce-eager</code> 并禁用了 FlashInfer sampler。生产 Linux 环境中如果启用 CUDA graph、Torch compile 和更优 kernel，性能可能更好。</p>
+    </section>
+
+    <section>
+      <h2>服务化推理链路</h2>
+      <pre><code>Client
+  |
+  | OpenAI-compatible HTTP request
+  v
+vLLM API Server
+  |
+  | request scheduling + continuous batching
+  v
+vLLM Engine
+  |
+  | PagedAttention / KV cache blocks
+  v
+GPU
+  |
+  | decode tokens
+  v
+Streaming response</code></pre>
+
+      <p>理解这条链路，比记住单个 benchmark 数字更重要。AI Infra 的核心不是只会调用模型，而是知道请求如何被调度、显存如何被规划、吞吐如何被测量。</p>
+    </section>
+
+    <section>
+      <h2>面试表达</h2>
+      <p>可以这样总结：</p>
+      <div class="note">
+        我在 WSL2 + RTX 4060 8GB 环境下使用 Qwen2.5-1.5B-Instruct 完成了 vLLM serving 实验。通过 OpenAI-compatible API 部署模型，并用并发请求 benchmark 对比不同 concurrency 下的 latency、TTFT、req/s 和 output tokens/s。实验中并发从 1 提升到 8 时，output token throughput 从 42.7 tokens/s 提升到 518.2 tokens/s，说明 vLLM 的 continuous batching 能在多用户场景下显著提高 GPU 利用率。同时，我也观察了 KV cache 显存规划和 PagedAttention 在服务化推理中的作用。
+      </div>
+    </section>
+  </main>
+</body>
+</html>
