@@ -192,6 +192,62 @@
       color: var(--accent);
     }
 
+    .diagram-wrap {
+      margin: 18px 0;
+      padding: 14px;
+      background: #f8fbff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+
+    .diagram-wrap svg {
+      display: block;
+      width: 100%;
+      min-width: 920px;
+      height: auto;
+    }
+
+    .svg-title {
+      font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      fill: #172033;
+    }
+
+    .svg-label {
+      font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      fill: #172033;
+    }
+
+    .svg-text {
+      font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      fill: #475569;
+    }
+
+    .svg-small {
+      font: 11px Consolas, "Cascadia Code", monospace;
+      fill: #475569;
+    }
+
+    .principle-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 14px 0;
+    }
+
+    .principle {
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .principle b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
     .note {
       margin: 12px 0;
       padding: 12px 14px;
@@ -242,7 +298,8 @@
       }
 
       .metric-grid,
-      .flow {
+      .flow,
+      .principle-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -333,6 +390,135 @@
       <div class="note">
         <strong>为什么 generated_tokens=128 但 decode_tokens=127？</strong>
         第一个新 token 是 prefill 后直接从最后一个位置的 logits 里选出来的；后面 127 个 token 才进入逐 token decode 循环，所以这是正常计数。
+      </div>
+
+      <h3>PD 分离技术原理图</h3>
+      <div class="diagram-wrap" aria-label="Prefill Decode 分离原理图">
+        <svg viewBox="0 0 1080 560" role="img" aria-labelledby="pd-title pd-desc" xmlns="http://www.w3.org/2000/svg">
+          <title id="pd-title">Prefill Decode 分离技术原理图</title>
+          <desc id="pd-desc">请求先进入 prefill worker 处理完整 prompt 并写入 KV Cache，之后 decode worker 逐 token 读取和更新 KV Cache，直到输出完成。</desc>
+          <defs>
+            <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"></path>
+            </marker>
+            <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"></path>
+            </marker>
+            <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"></path>
+            </marker>
+            <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.12"></feDropShadow>
+            </filter>
+          </defs>
+
+          <rect x="0" y="0" width="1080" height="560" rx="18" fill="#ffffff"></rect>
+          <text x="30" y="38" class="svg-title">PD 分离：把计算密集的 Prefill 和访存密集的 Decode 拆给不同执行资源</text>
+
+          <rect x="30" y="78" width="165" height="92" rx="10" fill="#eff6ff" stroke="#bfdbfe" filter="url(#soft-shadow)"></rect>
+          <text x="52" y="112" class="svg-label">用户请求</text>
+          <text x="52" y="136" class="svg-text">prompt tokens</text>
+          <text x="52" y="154" class="svg-small">input_len = N</text>
+
+          <rect x="250" y="70" width="245" height="110" rx="10" fill="#ecfdf5" stroke="#a7f3d0" filter="url(#soft-shadow)"></rect>
+          <text x="274" y="102" class="svg-label">Prefill Worker</text>
+          <text x="274" y="126" class="svg-text">一次 forward 完整 prompt</text>
+          <text x="274" y="146" class="svg-text">并行计算所有 prompt token</text>
+          <text x="274" y="166" class="svg-small">compute-bound, TTFT 主要来源</text>
+
+          <rect x="555" y="70" width="210" height="110" rx="10" fill="#fff7ed" stroke="#fed7aa" filter="url(#soft-shadow)"></rect>
+          <text x="580" y="102" class="svg-label">KV Cache Pool</text>
+          <text x="580" y="126" class="svg-text">保存每层历史 K/V</text>
+          <text x="580" y="146" class="svg-small">layer -> key/value pages</text>
+          <text x="580" y="166" class="svg-small">size grows with context</text>
+
+          <rect x="825" y="70" width="225" height="110" rx="10" fill="#f8fafc" stroke="#cbd5e1" filter="url(#soft-shadow)"></rect>
+          <text x="850" y="102" class="svg-label">Decode Worker</text>
+          <text x="850" y="126" class="svg-text">每步只处理 1 个 token</text>
+          <text x="850" y="146" class="svg-text">读取并追加 KV Cache</text>
+          <text x="850" y="166" class="svg-small">memory-bound, latency/token</text>
+
+          <path d="M 195 124 L 240 124" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"></path>
+          <text x="202" y="111" class="svg-small">dispatch</text>
+          <path d="M 495 124 L 545 124" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"></path>
+          <text x="505" y="111" class="svg-small">write K/V</text>
+          <path d="M 765 124 L 815 124" stroke="#b45309" stroke-width="3" marker-end="url(#arrow-orange)"></path>
+          <text x="770" y="111" class="svg-small">handoff</text>
+
+          <rect x="250" y="230" width="245" height="118" rx="10" fill="#f0fdf4" stroke="#bbf7d0"></rect>
+          <text x="274" y="262" class="svg-label">Prefill 阶段细节</text>
+          <text x="274" y="286" class="svg-text">1. Q/K/V 投影处理整个 prompt</text>
+          <text x="274" y="308" class="svg-text">2. attention 可在 token 维度并行</text>
+          <text x="274" y="330" class="svg-text">3. 输出首 token logits 和 past_key_values</text>
+
+          <rect x="555" y="230" width="210" height="118" rx="10" fill="#fff7ed" stroke="#fed7aa"></rect>
+          <text x="580" y="262" class="svg-label">缓存内容</text>
+          <text x="580" y="286" class="svg-text">每层保存 Key / Value</text>
+          <text x="580" y="308" class="svg-text">形状近似：</text>
+          <text x="580" y="330" class="svg-small">[layers, heads, seq, head_dim]</text>
+
+          <rect x="825" y="230" width="225" height="118" rx="10" fill="#f8fafc" stroke="#cbd5e1"></rect>
+          <text x="850" y="262" class="svg-label">Decode 阶段细节</text>
+          <text x="850" y="286" class="svg-text">1. 输入上一步生成的 token</text>
+          <text x="850" y="308" class="svg-text">2. 只计算新 token 的 K/V</text>
+          <text x="850" y="330" class="svg-text">3. 追加缓存，再采样下一个 token</text>
+
+          <path d="M 937 180 C 937 202 937 205 937 222" stroke="#b45309" stroke-width="3" fill="none" marker-end="url(#arrow-orange)"></path>
+          <path d="M 825 300 C 790 300 792 300 773 300" stroke="#b45309" stroke-width="3" fill="none" marker-end="url(#arrow-orange)"></path>
+          <path d="M 765 323 C 810 390 935 390 937 350" stroke="#b45309" stroke-width="3" fill="none" stroke-dasharray="7 6" marker-end="url(#arrow-orange)"></path>
+          <text x="790" y="386" class="svg-small">read old K/V, append new K/V, repeat</text>
+
+          <rect x="30" y="414" width="315" height="95" rx="10" fill="#eff6ff" stroke="#bfdbfe"></rect>
+          <text x="55" y="446" class="svg-label">为什么要分离？</text>
+          <text x="55" y="470" class="svg-text">Prefill 需要大矩阵并行计算，适合高算力批处理。</text>
+          <text x="55" y="492" class="svg-text">Decode 是长循环和缓存读写，适合低延迟调度。</text>
+
+          <rect x="382" y="414" width="315" height="95" rx="10" fill="#f0fdf4" stroke="#bbf7d0"></rect>
+          <text x="407" y="446" class="svg-label">分离后的调度收益</text>
+          <text x="407" y="470" class="svg-text">长 prompt 不阻塞短输出请求的 decode。</text>
+          <text x="407" y="492" class="svg-text">可以分别扩容 prefill GPU 和 decode GPU。</text>
+
+          <rect x="735" y="414" width="315" height="95" rx="10" fill="#fff7ed" stroke="#fed7aa"></rect>
+          <text x="760" y="446" class="svg-label">需要付出的代价</text>
+          <text x="760" y="470" class="svg-text">KV Cache 需要跨 worker 交接或共享管理。</text>
+          <text x="760" y="492" class="svg-text">调度复杂度和缓存碎片管理都会上升。</text>
+        </svg>
+      </div>
+
+      <h3>PD 分离到底分离了什么？</h3>
+      <p>
+        PD 分离中的 P 是 <strong>Prefill</strong>，D 是 <strong>Decode</strong>。它不是改变 Transformer 数学结构，而是把一次请求生命周期里两种性质完全不同的工作拆开调度：prefill 处理整段输入，吞吐依赖 GPU 并行矩阵计算；decode 按 token 串行推进，性能更依赖 KV Cache 读写、显存带宽、请求调度和 batch 组织。
+      </p>
+      <div class="principle-grid">
+        <div class="principle">
+          <b>1. Prefill 是“大块计算”</b>
+          输入 prompt 长度为 N 时，模型可以一次性对 N 个 token 做 Q/K/V 投影和 attention 计算。这个阶段 GPU 利用率通常更高，适合把多个请求的 prefill 合并成较大的 batch 来跑。它直接决定 TTFT，也就是用户等多久看到第一个 token。
+        </div>
+        <div class="principle">
+          <b>2. Decode 是“细粒度循环”</b>
+          Decode 第 t 步只会输入上一步生成的 1 个 token，但是它要读取之前所有 token 的 KV Cache。每一步计算量不大，却要反复读写缓存，所以更容易受显存带宽、KV Cache 布局和调度开销影响。
+        </div>
+        <div class="principle">
+          <b>3. KV Cache 是两阶段的交接物</b>
+          Prefill 结束后会产出 <code>past_key_values</code>。Decode 不再重算 prompt 的 K/V，而是把这个缓存作为历史上下文继续使用。也就是说，PD 分离的关键不是文本交接，而是 KV Cache 的交接、复用和生命周期管理。
+        </div>
+        <div class="principle">
+          <b>4. 分离的目标是资源匹配</b>
+          长 prompt 请求会占用大量 prefill 计算；长输出请求会占用大量 decode 步数。把两者拆开后，可以让 prefill worker 专注吃满算力，让 decode worker 专注低延迟逐 token 服务，避免两类工作互相拖慢。
+        </div>
+      </div>
+
+      <h3>工程系统里为什么常做 PD 分离？</h3>
+      <ul>
+        <li><strong>降低排队干扰：</strong>长 prompt 的 prefill 可能很慢，如果和 decode 混在同一队列里，会让已经开始输出的请求卡住，用户会看到断断续续的流式输出。</li>
+        <li><strong>提升吞吐：</strong>prefill 可以聚合成大 batch，更容易吃满 GPU 算力；decode 可以按 token 小步调度，用 continuous batching 维持稳定 tokens/s。</li>
+        <li><strong>独立扩容：</strong>如果业务是长输入短输出，可以增加 prefill 资源；如果业务是短输入长输出，可以增加 decode 资源，而不是整套模型副本一起扩。</li>
+        <li><strong>缓存管理更可控：</strong>服务框架可以围绕 KV Cache 做页式分配、复用、迁移和淘汰，减少显存碎片，并在多请求并发时保持稳定。</li>
+      </ul>
+
+      <div class="note warn-note">
+        <strong>注意：</strong>
+        PD 分离会带来额外工程复杂度，例如 KV Cache 跨设备传输、缓存地址映射、请求状态机、失败恢复和调度策略。小模型、低并发、本地学习实验里不一定需要真正拆成两个服务；但理解这个分离，对理解 vLLM、SGLang、TensorRT-LLM 等推理系统非常关键。
       </div>
     </section>
 

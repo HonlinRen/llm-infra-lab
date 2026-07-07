@@ -1,7 +1,5 @@
 import argparse
 
-from openai import OpenAI
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Call a vLLM OpenAI-compatible endpoint.")
@@ -9,6 +7,11 @@ def main() -> None:
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     parser.add_argument("--prompt", default="解释一下 PagedAttention 是什么")
     args = parser.parse_args()
+
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise SystemExit("Missing dependency: pip install openai") from exc
 
     client = OpenAI(base_url=args.base_url, api_key="EMPTY")
     response = client.chat.completions.create(

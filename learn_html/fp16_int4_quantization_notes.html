@@ -18,6 +18,10 @@
       --ok: #047857;
       --warn: #b45309;
       --bad: #b91c1c;
+      --ink: #0f172a;
+      --soft-green: #ecfdf5;
+      --soft-yellow: #fffbeb;
+      --soft-red: #fef2f2;
     }
 
     * {
@@ -51,7 +55,7 @@
     }
 
     header p {
-      max-width: 860px;
+      max-width: 880px;
       margin: 0;
       color: #dbeafe;
       font-size: 17px;
@@ -170,22 +174,17 @@
       color: var(--accent);
     }
 
-    .tag {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: #eef2ff;
-      color: #1d4ed8;
-      font-size: 13px;
-      font-weight: 700;
-    }
-
     .note {
       margin: 12px 0;
       padding: 12px 14px;
       border-left: 4px solid var(--accent);
       background: #f8fbff;
       border-radius: 6px;
+    }
+
+    .warn-note {
+      border-left-color: var(--warn);
+      background: var(--soft-yellow);
     }
 
     .ok {
@@ -205,6 +204,60 @@
 
     .muted {
       color: var(--muted);
+    }
+
+    .diagram {
+      width: 100%;
+      margin: 16px 0;
+      padding: 14px;
+      background: #fbfdff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+
+    .diagram svg {
+      display: block;
+      min-width: 760px;
+      width: 100%;
+      height: auto;
+    }
+
+    .svg-title {
+      font: 700 18px "Segoe UI", "Microsoft YaHei", sans-serif;
+      fill: var(--ink);
+    }
+
+    .svg-label {
+      font: 600 14px "Segoe UI", "Microsoft YaHei", sans-serif;
+      fill: var(--ink);
+    }
+
+    .svg-small {
+      font: 12px "Segoe UI", "Microsoft YaHei", sans-serif;
+      fill: #475569;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
     }
 
     @media (max-width: 820px) {
@@ -231,7 +284,7 @@
   <header>
     <div class="wrap">
       <h1>FP16 vs INT4 量化推理实验笔记</h1>
-      <p>围绕显存占用、加载速度、推理速度和回答质量，对比普通 FP16 推理与 bitsandbytes INT4 量化推理，并沉淀可用于面试表达的结论。</p>
+      <p>围绕显存占用、加载速度、推理速度和回答质量，对比普通 FP16 推理与 bitsandbytes INT4 量化推理。本文把实验结果、技术原理和面试表达放在一起，方便复盘。</p>
     </div>
   </header>
 
@@ -239,7 +292,7 @@
     <section>
       <h2>1. 一句话结论</h2>
       <p class="lead">
-        INT4 量化的核心价值是用更低精度表示模型权重，显著降低显存占用；代价是加载和推理时可能引入反量化、低比特 kernel 等额外开销，因此不保证一定比 FP16 更快，并且可能带来一定回答质量损失。
+        INT4 量化的核心收益是降低权重存储精度，从而显著减少显存占用；代价是加载和推理时可能引入量化层构建、反量化、低比特 kernel 等额外开销。因此 INT4 通常更省显存，但不保证一定比 FP16 更快，回答质量也需要结合任务人工评估。
       </p>
       <div class="metric-grid">
         <div class="metric">
@@ -266,32 +319,115 @@
     </section>
 
     <section>
-      <h2>2. 背景知识</h2>
+      <h2>2. FP16 与 INT4 的本质差异</h2>
       <div class="grid">
         <div>
           <h3>FP16 推理</h3>
           <ul>
-            <li>权重通常以 16-bit 浮点数存储和计算。</li>
-            <li>实现简单，GPU 支持成熟，速度通常比较稳定。</li>
-            <li>显存占用较高，模型越大越容易受显存限制。</li>
+            <li>权重通常以 16-bit 浮点数存储和参与计算。</li>
+            <li>GPU 对 FP16 Tensor Core 支持成熟，推理速度通常稳定。</li>
+            <li>缺点是权重显存较高，模型越大越容易受显存限制。</li>
           </ul>
         </div>
         <div>
           <h3>INT4 量化推理</h3>
           <ul>
-            <li>权重以 4-bit 形式存储，常见方案包括 NF4 等。</li>
-            <li>显存占用明显降低，更适合消费级 GPU 或多模型部署。</li>
-            <li>实际计算时可能需要反量化到 FP16/BF16，速度不一定提升。</li>
+            <li>权重以 4-bit 形式压缩存储，常见方案包括 NF4。</li>
+            <li>显存占用明显下降，更适合消费级 GPU 或多模型部署。</li>
+            <li>计算时可能需要反量化到 FP16/BF16，速度不一定提升。</li>
           </ul>
         </div>
       </div>
+
+      <div class="diagram" aria-label="FP16 和 INT4 权重表示示意图">
+        <svg viewBox="0 0 980 330" role="img">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+          <text x="24" y="34" class="svg-title">权重表示：从 16-bit 浮点到 4-bit 量化桶</text>
+
+          <rect x="40" y="72" width="380" height="92" rx="8" fill="#e8f0ff" stroke="#93b4fd"></rect>
+          <text x="62" y="103" class="svg-label">FP16 权重</text>
+          <text x="62" y="130" class="svg-small">每个参数约 16 bit，直接保存近似浮点值</text>
+          <text x="62" y="150" class="svg-small">例如：0.137、-1.42、2.06 ...</text>
+
+          <line x1="440" y1="118" x2="535" y2="118" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow)"></line>
+          <text x="454" y="95" class="svg-small">分组量化</text>
+          <text x="442" y="145" class="svg-small">scale / zero / codebook</text>
+
+          <rect x="560" y="72" width="380" height="92" rx="8" fill="#ecfdf5" stroke="#86efac"></rect>
+          <text x="582" y="103" class="svg-label">INT4 / NF4 权重</text>
+          <text x="582" y="130" class="svg-small">每个参数约 4 bit，存储为离散编号</text>
+          <text x="582" y="150" class="svg-small">计算前按分组 scale 还原为近似浮点值</text>
+
+          <rect x="65" y="210" width="280" height="38" rx="6" fill="#2563eb"></rect>
+          <rect x="65" y="258" width="70" height="38" rx="6" fill="#047857"></rect>
+          <text x="360" y="235" class="svg-small">FP16：16 bit / weight</text>
+          <text x="152" y="283" class="svg-small">INT4：4 bit / weight，加少量元数据</text>
+          <text x="65" y="314" class="svg-small">直觉：INT4 权重本体约为 FP16 的 1/4，但实际显存还包括量化元数据、激活、KV Cache、CUDA 缓存等。</text>
+        </svg>
+      </div>
+
       <div class="note">
-        本实验使用 Transformers + bitsandbytes 的 4bit 加载方式：<code>load_in_4bit=True</code>、<code>bnb_4bit_quant_type="nf4"</code>、<code>bnb_4bit_compute_dtype=torch.float16</code>。
+        本实验使用 Transformers + bitsandbytes 的 4bit 加载方式：<code>load_in_4bit=True</code>、<code>bnb_4bit_quant_type="nf4"</code>、<code>bnb_4bit_compute_dtype=torch.float16</code>。也就是说，权重用 4bit 存储，但计算 dtype 仍以 FP16 为主。
       </div>
     </section>
 
     <section>
-      <h2>3. 实验配置</h2>
+      <h2>3. INT4 推理链路</h2>
+      <p>
+        INT4 不是简单地把所有计算都变成 4bit。更常见的流程是：权重以低比特形式存放在显存中，矩阵乘法前由量化 kernel 读取 4bit 权重，并结合 scale/codebook 恢复近似值，再与激活做计算。这样可以减少权重读取量，但会增加反量化和 kernel 调度成本。
+      </p>
+
+      <div class="diagram" aria-label="FP16 与 INT4 推理路径对比图">
+        <svg viewBox="0 0 980 410" role="img">
+          <defs>
+            <marker id="arrow2" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+          <text x="24" y="34" class="svg-title">推理路径：FP16 更直接，INT4 多了量化相关步骤</text>
+
+          <text x="42" y="80" class="svg-label">FP16 路径</text>
+          <rect x="40" y="98" width="155" height="64" rx="8" fill="#e8f0ff" stroke="#93b4fd"></rect>
+          <text x="70" y="126" class="svg-label">FP16 权重</text>
+          <text x="66" y="147" class="svg-small">显存中直接存储</text>
+          <line x1="205" y1="130" x2="285" y2="130" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow2)"></line>
+          <rect x="300" y="98" width="155" height="64" rx="8" fill="#f1f5fb" stroke="#cbd5e1"></rect>
+          <text x="337" y="126" class="svg-label">GEMM</text>
+          <text x="322" y="147" class="svg-small">矩阵乘法</text>
+          <line x1="465" y1="130" x2="545" y2="130" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow2)"></line>
+          <rect x="560" y="98" width="155" height="64" rx="8" fill="#ecfdf5" stroke="#86efac"></rect>
+          <text x="596" y="126" class="svg-label">Logits</text>
+          <text x="587" y="147" class="svg-small">采样下个 token</text>
+
+          <text x="42" y="225" class="svg-label">INT4 路径</text>
+          <rect x="40" y="244" width="155" height="64" rx="8" fill="#ecfdf5" stroke="#86efac"></rect>
+          <text x="70" y="272" class="svg-label">4bit 权重</text>
+          <text x="61" y="293" class="svg-small">压缩存储，读得少</text>
+          <line x1="205" y1="276" x2="285" y2="276" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow2)"></line>
+          <rect x="300" y="244" width="155" height="64" rx="8" fill="#fffbeb" stroke="#facc15"></rect>
+          <text x="334" y="272" class="svg-label">反量化</text>
+          <text x="318" y="293" class="svg-small">scale / NF4 codebook</text>
+          <line x1="465" y1="276" x2="545" y2="276" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow2)"></line>
+          <rect x="560" y="244" width="155" height="64" rx="8" fill="#f1f5fb" stroke="#cbd5e1"></rect>
+          <text x="597" y="272" class="svg-label">GEMM</text>
+          <text x="583" y="293" class="svg-small">通常按 FP16 计算</text>
+          <line x1="725" y1="276" x2="805" y2="276" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow2)"></line>
+          <rect x="820" y="244" width="125" height="64" rx="8" fill="#ecfdf5" stroke="#86efac"></rect>
+          <text x="850" y="272" class="svg-label">Logits</text>
+          <text x="838" y="293" class="svg-small">采样输出</text>
+
+          <text x="40" y="355" class="svg-small">速度是否提升取决于：省下的显存读取时间 是否大于 反量化 + kernel 调度 + 低比特实现开销。</text>
+          <text x="40" y="380" class="svg-small">在本实验 1.7B 小模型上，INT4 省显存很明显，但生成速度低于 FP16。</text>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. 实验配置</h2>
       <table>
         <tr>
           <th>项目</th>
@@ -306,12 +442,12 @@
           <td><code>fp16</code> 与 <code>int4</code></td>
         </tr>
         <tr>
-          <td>输入 token</td>
-          <td>54</td>
+          <td>输入 / 输出 token</td>
+          <td>输入 54 tokens，输出 256 tokens，两种模式保持一致</td>
         </tr>
         <tr>
-          <td>输出 token</td>
-          <td>256，两种模式保持一致</td>
+          <td>量化方式</td>
+          <td>bitsandbytes 4bit，NF4，compute dtype 为 FP16</td>
         </tr>
         <tr>
           <td>结果文件</td>
@@ -324,7 +460,7 @@
     </section>
 
     <section>
-      <h2>4. 实测结果</h2>
+      <h2>5. 实测结果</h2>
       <table>
         <tr>
           <th>指标</th>
@@ -363,34 +499,147 @@
           <td><span class="warn">INT4 慢约 21%</span>，小模型上低比特推理未必占优。</td>
         </tr>
       </table>
+
+      <div class="diagram" aria-label="实验指标柱状图">
+        <svg viewBox="0 0 980 430" role="img">
+          <text x="24" y="34" class="svg-title">实测数据可视化：显存下降明显，速度没有提升</text>
+
+          <text x="70" y="80" class="svg-label">显存占用 GB</text>
+          <line x1="80" y1="310" x2="430" y2="310" stroke="#cbd5e1" stroke-width="2"></line>
+          <line x1="80" y1="110" x2="80" y2="310" stroke="#cbd5e1" stroke-width="2"></line>
+          <rect x="140" y="122" width="72" height="188" fill="#2563eb" rx="5"></rect>
+          <rect x="260" y="249" width="72" height="61" fill="#047857" rx="5"></rect>
+          <text x="142" y="116" class="svg-small">3.19</text>
+          <text x="265" y="243" class="svg-small">1.04</text>
+          <text x="141" y="335" class="svg-small">FP16</text>
+          <text x="263" y="335" class="svg-small">INT4</text>
+          <text x="110" y="370" class="svg-small">INT4 约节省 67% 加载后显存</text>
+
+          <text x="555" y="80" class="svg-label">生成速度 tokens/s</text>
+          <line x1="565" y1="310" x2="915" y2="310" stroke="#cbd5e1" stroke-width="2"></line>
+          <line x1="565" y1="110" x2="565" y2="310" stroke="#cbd5e1" stroke-width="2"></line>
+          <rect x="625" y="113" width="72" height="197" fill="#2563eb" rx="5"></rect>
+          <rect x="745" y="155" width="72" height="155" fill="#b45309" rx="5"></rect>
+          <text x="621" y="107" class="svg-small">53.61</text>
+          <text x="742" y="149" class="svg-small">42.32</text>
+          <text x="626" y="335" class="svg-small">FP16</text>
+          <text x="748" y="335" class="svg-small">INT4</text>
+          <text x="600" y="370" class="svg-small">INT4 生成速度约慢 21%</text>
+
+          <circle cx="402" cy="391" r="6" fill="#2563eb"></circle>
+          <text x="416" y="396" class="svg-small">FP16</text>
+          <circle cx="482" cy="391" r="6" fill="#047857"></circle>
+          <text x="496" y="396" class="svg-small">INT4 显存收益</text>
+          <circle cx="615" cy="391" r="6" fill="#b45309"></circle>
+          <text x="629" y="396" class="svg-small">INT4 速度代价</text>
+        </svg>
+      </div>
     </section>
 
     <section>
-      <h2>5. 怎么解释这些现象</h2>
-      <h3>为什么 INT4 显存更低？</h3>
+      <h2>6. 显存占用为什么下降</h2>
       <p>
-        FP16 每个权重约占 16 bit，而 INT4 每个权重约占 4 bit。虽然实际还会有量化 scale、zero point 或分组元数据等额外开销，但总体权重显存仍会明显下降。本实验里加载后显存从 <code>3.19GB</code> 降到 <code>1.04GB</code>，说明权重量化带来了非常直接的显存收益。
+        大模型推理时，显存并不只包含权重，还包含激活、KV Cache、CUDA allocator reserved memory、临时 buffer 等。INT4 主要压缩的是权重部分，所以当模型权重是主要显存来源时，收益非常明显；当上下文很长、batch 很大时，KV Cache 和激活也会成为重要显存来源。
       </p>
 
-      <h3>为什么 INT4 不一定更快？</h3>
-      <p>
-        低比特权重减少了显存读取量，但 Transformers + bitsandbytes 的 4bit 推理通常不是全程原生 INT4 矩阵计算。实际推理中可能需要把 4bit 权重反量化到 FP16/BF16 后再参与计算，或者调用特定低比特 kernel。对于 1.7B 这种相对小的模型，反量化和 kernel 开销可能超过省下来的显存带宽收益，因此 tokens/s 反而低于 FP16。
-      </p>
+      <div class="diagram" aria-label="推理显存组成示意图">
+        <svg viewBox="0 0 980 360" role="img">
+          <text x="24" y="34" class="svg-title">推理显存组成：INT4 主要压缩权重，不直接压缩所有开销</text>
 
-      <h3>为什么加载速度也可能变慢？</h3>
-      <p>
-        INT4 加载时不仅要读取权重，还要构建量化线性层、读取或生成量化相关元数据，并完成 device map 分配。相比直接加载 FP16 权重，这些步骤会带来额外耗时。本次复跑后 FP16 加载约 <code>2.85s</code>，INT4 约 <code>4.52s</code>。
-      </p>
+          <text x="65" y="78" class="svg-label">FP16</text>
+          <rect x="65" y="98" width="420" height="52" fill="#2563eb" rx="6"></rect>
+          <rect x="65" y="160" width="96" height="52" fill="#facc15" rx="6"></rect>
+          <rect x="171" y="160" width="96" height="52" fill="#38bdf8" rx="6"></rect>
+          <rect x="277" y="160" width="118" height="52" fill="#cbd5e1" rx="6"></rect>
+          <text x="230" y="130" class="svg-small" fill="#fff">权重：最大头寸</text>
+          <text x="83" y="191" class="svg-small">KV Cache</text>
+          <text x="192" y="191" class="svg-small">激活</text>
+          <text x="302" y="191" class="svg-small">临时 buffer</text>
+
+          <text x="65" y="262" class="svg-label">INT4</text>
+          <rect x="65" y="282" width="140" height="52" fill="#047857" rx="6"></rect>
+          <rect x="215" y="282" width="96" height="52" fill="#facc15" rx="6"></rect>
+          <rect x="321" y="282" width="96" height="52" fill="#38bdf8" rx="6"></rect>
+          <rect x="427" y="282" width="118" height="52" fill="#cbd5e1" rx="6"></rect>
+          <text x="93" y="313" class="svg-small" fill="#fff">4bit 权重</text>
+          <text x="233" y="313" class="svg-small">KV Cache</text>
+          <text x="342" y="313" class="svg-small">激活</text>
+          <text x="452" y="313" class="svg-small">临时 buffer</text>
+
+          <text x="590" y="120" class="svg-label">本次实验</text>
+          <text x="590" y="150" class="svg-small">加载后显存：3.19GB -> 1.04GB</text>
+          <text x="590" y="175" class="svg-small">峰值显存：3.27GB -> 1.11GB</text>
+          <text x="590" y="205" class="svg-small">说明 1.7B 模型在该测试里，权重显存占比很高。</text>
+          <text x="590" y="235" class="svg-small">如果上下文长度显著增加，KV Cache 会持续增长，</text>
+          <text x="590" y="260" class="svg-small">此时仅压缩权重不能完全解决显存压力。</text>
+        </svg>
+      </div>
     </section>
 
     <section>
-      <h2>6. 回答质量分析</h2>
+      <h2>7. 加载速度与推理速度怎么理解</h2>
+      <h3>加载速度</h3>
+      <p>
+        FP16 加载路径较直接：读取权重、放到设备、构建模型模块。INT4 加载除了读取权重，还需要替换或构建量化线性层，处理量化参数，并完成 device map 分配。因此第一次排除下载影响后，仍可能出现 INT4 加载慢于 FP16 的现象。本实验中 FP16 为 <code>2.85s</code>，INT4 为 <code>4.52s</code>。
+      </p>
+
+      <h3>推理速度</h3>
+      <p>
+        推理速度取决于计算瓶颈和访存瓶颈的平衡。INT4 降低了权重读取量，理论上对访存瓶颈有帮助；但如果模型较小、batch 较小、GPU 的 FP16 路径已经很快，那么反量化和低比特 kernel 开销可能抵消收益。本实验中 INT4 从 <code>53.61 tokens/s</code> 下降到 <code>42.32 tokens/s</code>，说明当前配置下 INT4 更像是“省显存方案”，不是“加速方案”。
+      </p>
+
+      <div class="note warn-note">
+        面试里不要绝对说“INT4 一定更快”。更准确的说法是：INT4 通常降低显存和访存压力，但速度取决于硬件、kernel 实现、模型大小、batch size、上下文长度和推理框架。
+      </div>
+    </section>
+
+    <section>
+      <h2>8. 回答质量分析</h2>
       <p>
         两种模式都能输出完整英文回答，没有明显乱码、格式崩坏或重复循环；但它们对 KV Cache 的解释都不够准确。模型把 KV Cache 说成“缓存 previous inference tasks”或“缓存训练数据/常用信息”，这偏离了 LLM 推理里的真实含义。
       </p>
-      <div class="note">
-        准确说法：KV Cache 缓存 Transformer 每一层历史 token 的 Key/Value 张量，使自回归 decode 阶段生成下一个 token 时不必重复计算所有历史 token 的 K/V；代价是上下文越长，KV Cache 占用显存越多。
+
+      <div class="diagram" aria-label="KV Cache 正确机制示意图">
+        <svg viewBox="0 0 980 390" role="img">
+          <defs>
+            <marker id="arrow3" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+          <text x="24" y="34" class="svg-title">KV Cache 的正确含义：缓存历史 token 的 Key / Value 张量</text>
+
+          <rect x="45" y="80" width="175" height="70" rx="8" fill="#e8f0ff" stroke="#93b4fd"></rect>
+          <text x="78" y="111" class="svg-label">历史 tokens</text>
+          <text x="64" y="133" class="svg-small">t1, t2, ..., tn-1</text>
+          <line x1="230" y1="115" x2="310" y2="115" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow3)"></line>
+
+          <rect x="325" y="80" width="210" height="70" rx="8" fill="#f1f5fb" stroke="#cbd5e1"></rect>
+          <text x="370" y="111" class="svg-label">Transformer 层</text>
+          <text x="348" y="133" class="svg-small">计算每层 Key / Value</text>
+          <line x1="545" y1="115" x2="625" y2="115" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow3)"></line>
+
+          <rect x="640" y="80" width="250" height="70" rx="8" fill="#ecfdf5" stroke="#86efac"></rect>
+          <text x="720" y="111" class="svg-label">KV Cache</text>
+          <text x="663" y="133" class="svg-small">保存历史 token 的 K/V 张量</text>
+
+          <rect x="45" y="230" width="175" height="70" rx="8" fill="#fffbeb" stroke="#facc15"></rect>
+          <text x="81" y="261" class="svg-label">新 token</text>
+          <text x="92" y="283" class="svg-small">只计算 tn</text>
+          <line x1="230" y1="265" x2="310" y2="265" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow3)"></line>
+
+          <rect x="325" y="230" width="210" height="70" rx="8" fill="#f1f5fb" stroke="#cbd5e1"></rect>
+          <text x="370" y="261" class="svg-label">Attention</text>
+          <text x="348" y="283" class="svg-small">新 Query + 历史 K/V</text>
+          <line x1="545" y1="265" x2="625" y2="265" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow3)"></line>
+
+          <rect x="640" y="230" width="250" height="70" rx="8" fill="#e8f0ff" stroke="#93b4fd"></rect>
+          <text x="696" y="261" class="svg-label">生成下一个 token</text>
+          <text x="684" y="283" class="svg-small">避免重复算所有历史 K/V</text>
+
+          <text x="58" y="348" class="svg-small">注意：KV Cache 不是缓存“以前任务的答案”，也不是缓存训练数据；它缓存的是当前序列历史 token 在每层 Attention 中的 Key/Value 张量。</text>
+        </svg>
       </div>
+
       <table>
         <tr>
           <th>模式</th>
@@ -411,7 +660,7 @@
     </section>
 
     <section>
-      <h2>7. 实践注意事项</h2>
+      <h2>9. 实践注意事项</h2>
       <ul>
         <li>首次运行如果包含模型下载，加载时间会被网络和缓存污染；要复跑一次再记录加载速度。</li>
         <li>显存建议同时记录 <code>memory_allocated</code>、<code>memory_reserved</code> 和 <code>max_memory_allocated</code>。</li>
@@ -422,10 +671,8 @@
     </section>
 
     <section>
-      <h2>8. 面试表达</h2>
-      <p>
-        可以这样说：
-      </p>
+      <h2>10. 面试表达</h2>
+      <p>可以这样说：</p>
       <div class="note">
         我做过 FP16 和 INT4 的量化推理对比。以 SmolLM2-1.7B-Instruct 为例，INT4 把加载后显存从约 3.19GB 降到 1.04GB，峰值显存从约 3.27GB 降到 1.11GB，显存节省约三分之二。但在这台机器上，INT4 的生成速度从 53.61 tokens/s 降到 42.32 tokens/s，加载也从 2.85s 增加到 4.52s。我的理解是，INT4 主要降低权重显存和访存压力，但 bitsandbytes 4bit 推理存在反量化和 kernel 开销，小模型上不一定能换来速度提升。质量方面没有明显格式崩坏，但准确性仍取决于模型本身能力和量化误差，需要结合任务人工评估。
       </div>

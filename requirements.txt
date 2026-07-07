@@ -6,5 +6,6 @@ peft
 trl
 bitsandbytes
 openai
+vllm
 sentencepiece
 safetensors

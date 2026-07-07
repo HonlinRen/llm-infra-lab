@@ -171,6 +171,28 @@
       border-radius: 6px;
     }
 
+    .svg-figure {
+      margin: 18px 0;
+      padding: 14px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+
+    .svg-figure svg {
+      display: block;
+      width: 100%;
+      min-width: 720px;
+      height: auto;
+    }
+
+    .svg-caption {
+      margin: 10px 2px 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
     .ok {
       color: var(--ok);
       font-weight: 700;
@@ -234,6 +256,59 @@
         <li><code>lora_dropout</code>：训练时的 dropout，用于缓解过拟合。</li>
       </ul>
 
+      <div class="svg-figure">
+        <svg viewBox="0 0 960 330" role="img" aria-label="LoRA 低秩适配原理图">
+          <defs>
+            <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"></path>
+            </marker>
+            <marker id="arrow-gray" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"></path>
+            </marker>
+          </defs>
+
+          <rect x="28" y="42" width="128" height="70" rx="8" fill="#dbeafe" stroke="#2563eb"></rect>
+          <text x="92" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">输入向量 x</text>
+          <text x="92" y="94" text-anchor="middle" font-size="13" fill="#1e3a8a">token hidden state</text>
+
+          <rect x="232" y="28" width="170" height="98" rx="8" fill="#e2e8f0" stroke="#64748b"></rect>
+          <text x="317" y="61" text-anchor="middle" font-size="16" font-weight="700" fill="#334155">冻结原权重 W</text>
+          <text x="317" y="85" text-anchor="middle" font-size="13" fill="#475569">不更新大模型参数</text>
+          <text x="317" y="106" text-anchor="middle" font-size="13" fill="#475569">例如 q_proj / v_proj</text>
+
+          <rect x="232" y="186" width="80" height="72" rx="8" fill="#dcfce7" stroke="#16a34a"></rect>
+          <text x="272" y="218" text-anchor="middle" font-size="16" font-weight="700" fill="#166534">A</text>
+          <text x="272" y="240" text-anchor="middle" font-size="13" fill="#166534">d -> r</text>
+
+          <rect x="348" y="186" width="80" height="72" rx="8" fill="#dcfce7" stroke="#16a34a"></rect>
+          <text x="388" y="218" text-anchor="middle" font-size="16" font-weight="700" fill="#166534">B</text>
+          <text x="388" y="240" text-anchor="middle" font-size="13" fill="#166534">r -> d</text>
+
+          <rect x="520" y="86" width="182" height="86" rx="8" fill="#fef3c7" stroke="#d97706"></rect>
+          <text x="611" y="118" text-anchor="middle" font-size="16" font-weight="700" fill="#92400e">有效权重</text>
+          <text x="611" y="142" text-anchor="middle" font-size="15" fill="#92400e">W' = W + α/r · BA</text>
+
+          <rect x="788" y="92" width="132" height="70" rx="8" fill="#dbeafe" stroke="#2563eb"></rect>
+          <text x="854" y="122" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">输出 y</text>
+          <text x="854" y="144" text-anchor="middle" font-size="13" fill="#1e3a8a">下一层 hidden state</text>
+
+          <line x1="156" y1="76" x2="232" y2="76" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-gray)"></line>
+          <line x1="402" y1="76" x2="520" y2="116" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-gray)"></line>
+          <line x1="156" y1="76" x2="232" y2="220" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-blue)"></line>
+          <line x1="312" y1="222" x2="348" y2="222" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-blue)"></line>
+          <line x1="428" y1="222" x2="520" y2="146" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-blue)"></line>
+          <line x1="702" y1="129" x2="788" y2="129" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"></line>
+
+          <text x="330" y="292" text-anchor="middle" font-size="14" fill="#166534">训练时只更新 A 和 B，参数量约为 d·r + r·d，远小于 d·d</text>
+          <text x="622" y="214" text-anchor="middle" font-size="14" fill="#92400e">推理时可以临时叠加，也可以 merge 写回 W</text>
+        </svg>
+        <p class="svg-caption">图 1：LoRA 把大矩阵更新 ΔW 分解成两个低秩矩阵 B 和 A。基座权重 W 冻结，训练只发生在绿色的 LoRA 分支上。</p>
+      </div>
+
+      <h3>LoRA 的数学直觉</h3>
+      <p>普通全量微调会直接更新模型里的大权重矩阵 <code>W</code>。如果某个线性层输入输出维度都是 <code>d</code>，那么这个矩阵大约有 <code>d * d</code> 个参数。LoRA 假设微调所需的变化 <code>ΔW</code> 可以用低秩结构近似，于是把它写成 <code>B * A</code>，其中秩 <code>r</code> 远小于 <code>d</code>。</p>
+      <p>训练时实际参与计算的是 <code>y = W x + α/r * B A x</code>。其中 <code>W</code> 保持冻结，只有 <code>A</code> 和 <code>B</code> 更新。这样显存主要消耗在少量 LoRA 参数、梯度和优化器状态上，适合个人 GPU 做快速实验。</p>
+
       <h3>为什么 adapter 不是完整模型</h3>
       <p>训练输出的 <code>adapter_model.safetensors</code> 只有几 MB，因为它只保存 LoRA 参数。推理时必须同时加载基座模型和 adapter：</p>
       <pre><code class="language-text">微调后模型 = Qwen/Qwen2.5-0.5B-Instruct + ./qwen-lora-adapter</code></pre>
@@ -278,6 +353,51 @@ print(dataset.column_names)</code></pre>
         )
 
     return f"### Instruction:\n{instruction}\n\n### Response:\n{output}"</code></pre>
+
+      <div class="svg-figure">
+        <svg viewBox="0 0 960 300" role="img" aria-label="SFT 数据处理流程图">
+          <defs>
+            <marker id="arrow-sft" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+
+          <rect x="28" y="48" width="160" height="112" rx="8" fill="#ecfeff" stroke="#0891b2"></rect>
+          <text x="108" y="78" text-anchor="middle" font-size="16" font-weight="700" fill="#155e75">原始样本</text>
+          <text x="108" y="105" text-anchor="middle" font-size="13" fill="#155e75">instruction</text>
+          <text x="108" y="128" text-anchor="middle" font-size="13" fill="#155e75">input</text>
+          <text x="108" y="151" text-anchor="middle" font-size="13" fill="#155e75">output</text>
+
+          <rect x="260" y="40" width="174" height="128" rx="8" fill="#dbeafe" stroke="#2563eb"></rect>
+          <text x="347" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">format_prompt</text>
+          <text x="347" y="100" text-anchor="middle" font-size="13" fill="#1e3a8a">### Instruction</text>
+          <text x="347" y="123" text-anchor="middle" font-size="13" fill="#1e3a8a">### Input</text>
+          <text x="347" y="146" text-anchor="middle" font-size="13" fill="#1e3a8a">### Response</text>
+
+          <rect x="512" y="48" width="154" height="112" rx="8" fill="#fef3c7" stroke="#d97706"></rect>
+          <text x="589" y="82" text-anchor="middle" font-size="16" font-weight="700" fill="#92400e">Tokenizer</text>
+          <text x="589" y="111" text-anchor="middle" font-size="13" fill="#92400e">input_ids</text>
+          <text x="589" y="134" text-anchor="middle" font-size="13" fill="#92400e">attention_mask</text>
+
+          <rect x="744" y="48" width="170" height="112" rx="8" fill="#dcfce7" stroke="#16a34a"></rect>
+          <text x="829" y="82" text-anchor="middle" font-size="16" font-weight="700" fill="#166534">Causal LM Loss</text>
+          <text x="829" y="111" text-anchor="middle" font-size="13" fill="#166534">预测下一个 token</text>
+          <text x="829" y="134" text-anchor="middle" font-size="13" fill="#166534">更新 LoRA 参数</text>
+
+          <line x1="188" y1="104" x2="260" y2="104" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-sft)"></line>
+          <line x1="434" y1="104" x2="512" y2="104" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-sft)"></line>
+          <line x1="666" y1="104" x2="744" y2="104" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-sft)"></line>
+
+          <rect x="260" y="212" width="404" height="52" rx="8" fill="#f8fafc" stroke="#94a3b8"></rect>
+          <text x="462" y="244" text-anchor="middle" font-size="14" fill="#334155">labels 通常是 input_ids 的右移目标：第 t 个位置预测第 t+1 个 token</text>
+          <line x1="590" y1="160" x2="514" y2="212" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-sft)"></line>
+        </svg>
+        <p class="svg-caption">图 2：SFT 的关键不是“背答案”，而是让模型在给定 instruction/input 上学习 output 的 token 分布。</p>
+      </div>
+
+      <h3>SFT 训练到底在优化什么</h3>
+      <p>对于因果语言模型，训练目标是“根据前面的 token 预测下一个 token”。格式化后的完整文本会被 tokenizer 切成 token 序列，模型在每个位置输出一个词表概率分布，loss 衡量真实下一个 token 在这个分布中是否被赋予了高概率。</p>
+      <p>本次训练用的是 <code>SFTTrainer</code>，它会把格式化函数产出的文本继续处理成模型输入。随着 loss 下降，模型更倾向于在类似中文指令场景中生成符合训练数据风格的回答。</p>
     </section>
 
     <section id="train">
@@ -488,6 +608,45 @@ answer_ids = outputs[0][inputs["input_ids"].shape[-1]:]
 answer = tokenizer.decode(answer_ids, skip_special_tokens=True)
 print(answer)</code></pre>
 
+      <div class="svg-figure">
+        <svg viewBox="0 0 960 300" role="img" aria-label="LoRA adapter 推理路径图">
+          <defs>
+            <marker id="arrow-infer" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+
+          <rect x="34" y="64" width="144" height="72" rx="8" fill="#dbeafe" stroke="#2563eb"></rect>
+          <text x="106" y="96" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">用户问题</text>
+          <text x="106" y="119" text-anchor="middle" font-size="13" fill="#1e3a8a">chat template</text>
+
+          <rect x="244" y="38" width="210" height="98" rx="8" fill="#e2e8f0" stroke="#64748b"></rect>
+          <text x="349" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="#334155">基座模型</text>
+          <text x="349" y="98" text-anchor="middle" font-size="13" fill="#475569">Qwen2.5-0.5B-Instruct</text>
+          <text x="349" y="119" text-anchor="middle" font-size="13" fill="#475569">原始权重 W</text>
+
+          <rect x="244" y="178" width="210" height="74" rx="8" fill="#dcfce7" stroke="#16a34a"></rect>
+          <text x="349" y="210" text-anchor="middle" font-size="16" font-weight="700" fill="#166534">LoRA adapter</text>
+          <text x="349" y="233" text-anchor="middle" font-size="13" fill="#166534">A/B 增量权重</text>
+
+          <rect x="548" y="86" width="162" height="88" rx="8" fill="#fef3c7" stroke="#d97706"></rect>
+          <text x="629" y="119" text-anchor="middle" font-size="16" font-weight="700" fill="#92400e">运行时叠加</text>
+          <text x="629" y="144" text-anchor="middle" font-size="14" fill="#92400e">W x + LoRA(x)</text>
+
+          <rect x="786" y="92" width="134" height="72" rx="8" fill="#dbeafe" stroke="#2563eb"></rect>
+          <text x="853" y="124" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">生成回答</text>
+          <text x="853" y="147" text-anchor="middle" font-size="13" fill="#1e3a8a">decode tokens</text>
+
+          <line x1="178" y1="100" x2="244" y2="88" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-infer)"></line>
+          <line x1="454" y1="88" x2="548" y2="116" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-infer)"></line>
+          <line x1="454" y1="216" x2="548" y2="144" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-infer)"></line>
+          <line x1="710" y1="130" x2="786" y2="130" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-infer)"></line>
+
+          <text x="350" y="280" text-anchor="middle" font-size="14" fill="#334155">adapter 推理的优点：一个基座模型可以搭配多个不同任务的 LoRA adapter</text>
+        </svg>
+        <p class="svg-caption">图 3：未合并时，推理链路中同时存在基座模型和 adapter。PEFT 在运行时把 LoRA 分支的输出叠加到原线性层上。</p>
+      </div>
+
       <h3>如何确认不是原始 Qwen</h3>
       <p>推理脚本中加入：</p>
       <pre><code class="language-python">print(type(model))
@@ -514,6 +673,46 @@ target_modules={'q_proj', 'k_proj', 'v_proj', 'o_proj'}</code></pre>
 
       <p>合并 LoRA 的目的，是把 adapter 权重写回基座模型权重，生成一个完整模型目录。合并后部署时不再依赖 <code>peft.PeftModel</code>，可以直接用 Transformers 加载：</p>
       <pre><code class="language-text">./qwen-lora-merged</code></pre>
+
+      <div class="svg-figure">
+        <svg viewBox="0 0 960 340" role="img" aria-label="LoRA 合并前后对比图">
+          <defs>
+            <marker id="arrow-merge" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"></path>
+            </marker>
+          </defs>
+
+          <text x="210" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#334155">合并前</text>
+          <rect x="48" y="64" width="150" height="78" rx="8" fill="#e2e8f0" stroke="#64748b"></rect>
+          <text x="123" y="96" text-anchor="middle" font-size="15" font-weight="700" fill="#334155">基座权重 W</text>
+          <text x="123" y="119" text-anchor="middle" font-size="13" fill="#475569">完整大模型</text>
+
+          <rect x="228" y="64" width="150" height="78" rx="8" fill="#dcfce7" stroke="#16a34a"></rect>
+          <text x="303" y="96" text-anchor="middle" font-size="15" font-weight="700" fill="#166534">LoRA ΔW</text>
+          <text x="303" y="119" text-anchor="middle" font-size="13" fill="#166534">adapter_model</text>
+
+          <rect x="138" y="188" width="152" height="72" rx="8" fill="#fef3c7" stroke="#d97706"></rect>
+          <text x="214" y="218" text-anchor="middle" font-size="15" font-weight="700" fill="#92400e">运行时计算</text>
+          <text x="214" y="241" text-anchor="middle" font-size="13" fill="#92400e">W + α/r · BA</text>
+
+          <line x1="123" y1="142" x2="186" y2="188" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-merge)"></line>
+          <line x1="303" y1="142" x2="242" y2="188" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-merge)"></line>
+
+          <line x1="408" y1="166" x2="540" y2="166" stroke="#2563eb" stroke-width="4" marker-end="url(#arrow-merge)"></line>
+          <text x="474" y="146" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">merge_and_unload()</text>
+          <text x="474" y="192" text-anchor="middle" font-size="13" fill="#1e3a8a">把增量加回权重矩阵</text>
+
+          <text x="730" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#334155">合并后</text>
+          <rect x="588" y="86" width="284" height="112" rx="10" fill="#dbeafe" stroke="#2563eb"></rect>
+          <text x="730" y="124" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">完整 merged 权重 W'</text>
+          <text x="730" y="151" text-anchor="middle" font-size="14" fill="#1e3a8a">W' = W + α/r · BA</text>
+          <text x="730" y="176" text-anchor="middle" font-size="13" fill="#1e3a8a">不再需要 adapter 文件参与推理</text>
+
+          <rect x="622" y="246" width="216" height="52" rx="8" fill="#f8fafc" stroke="#94a3b8"></rect>
+          <text x="730" y="277" text-anchor="middle" font-size="14" fill="#334155">AutoModelForCausalLM 直接加载</text>
+        </svg>
+        <p class="svg-caption">图 4：合并不会重新训练模型，而是做一次权重加法。合并后的模型更方便部署，但会失去 adapter 灵活切换的轻量优势。</p>
+      </div>
 
       <table>
         <thead>
